@@ -14,6 +14,7 @@ export default function Footer({
   turnUsername = "",
   teamColorClass = "",
   myTurn = false,
+  myTeamColor = undefined,
 }) {
   const [cellPx, setCellPx] = useState(null);
   const cardsBoxRef = useRef(null);
@@ -59,6 +60,14 @@ export default function Footer({
               {hand.map((cardStr, i) => {
                 const { rank, suit } = parseCard(cardStr);
                 const isSelected = selectedCard === cardStr;
+                const ringColorClass =
+                  myTeamColor === "emerald"
+                    ? "ring-emerald-500"
+                    : myTeamColor === "sky"
+                    ? "ring-sky-500"
+                    : myTeamColor === "rose"
+                    ? "ring-rose-500"
+                    : "ring-blue-500";
                 return (
                   <button
                     key={`${cardStr}-${i}`}
@@ -74,9 +83,16 @@ export default function Footer({
                       "shrink-0 snap-center relative focus:outline-none"
                     }
                   >
-                    <PlayingCard type="card" rank={rank} suit={suit} />
+                    <PlayingCard
+                      type="card"
+                      rank={rank}
+                      suit={suit}
+                      interactive={false}
+                    />
                     {isSelected && (
-                      <div className="absolute inset-0 ring-2 ring-emerald-500 rounded-md pointer-events-none" />
+                      <div
+                        className={`absolute inset-0 ring-2 rounded-md pointer-events-none ${ringColorClass}`}
+                      />
                     )}
                   </button>
                 );
@@ -101,7 +117,11 @@ export default function Footer({
                 "shrink-0 w-24 sm:w-28 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors flex items-center justify-center"
               }
             >
-              Dead card
+              <span className="text-center leading-tight">
+                Dead
+                <br />
+                Card?
+              </span>
             </button>
           ) : (
             <button
@@ -117,10 +137,14 @@ export default function Footer({
               }
               className={
                 (cellPx ? "" : "h-14 sm:h-16 md:h-[78px] ") +
-                "shrink-0 w-28 rounded-lg bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold transition-colors flex items-center justify-center"
+                "shrink-0 w-28 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-base font-semibold transition-colors flex items-center justify-center"
               }
             >
-              Confirm Move
+              <span className="text-center leading-tight">
+                Confirm
+                <br />
+                Move?
+              </span>
             </button>
           )}
         </div>
