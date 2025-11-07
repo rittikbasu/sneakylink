@@ -19,8 +19,23 @@
   }
 }
 
+html {
+  background: #000000;
+}
+
 body {
-  background: var(--background);
+  background: linear-gradient(to bottom, #000000 0%, #141414 70%, #000000 100%);
+  background-attachment: fixed;
+  min-height: 100dvh;
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  overflow-x: hidden;
 }
+
+#__next {
+  min-height: 100dvh;
+}
+
+/* Hide noisy scrollbars on mobile card row */
+.scrollbar-none::-webkit-scrollbar { display: none; }
+.scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
