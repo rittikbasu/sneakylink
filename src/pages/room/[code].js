@@ -1,12 +1,14 @@
 import { useRouter } from "next/router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 import BoardGrid from "@/components/BoardGrid";
+import Sidebar from "@/components/Sidebar";
+import RulesModal from "@/components/RulesModal";
 import layout from "@/data/boardLayout";
 import { parseCard } from "@/lib/deck";
-import { Copy, Users, Check, Settings } from "lucide-react";
+import { Copy, Users, Check, Settings, Trophy, Frown } from "lucide-react";
 import { ALL_LINES } from "@/lib/lines";
 
 export default function RoomPage() {
@@ -30,6 +32,9 @@ export default function RoomPage() {
   const [posting, setPosting] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const wakeLockRef = useRef(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [rulesOpen, setRulesOpen] = useState(false);
 
   useEffect(() => {
     if (!code) return;
@@ -157,6 +162,51 @@ export default function RoomPage() {
       supabase.removeChannel(roomSub);
     };
   }, [code, room?.id, game, playerId]);
+
+  // Screen Wake Lock - keep screen on during game
+  useEffect(() => {
+    // Only enable wake lock when in a room (lobby or active game)
+    if (!room) return;
+
+    const requestWakeLock = async () => {
+      try {
+        if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
+          const sentinel = await navigator.wakeLock.request("screen");
+          // Re-acquire if the wake lock is released by the UA (low power, etc.)
+          sentinel.addEventListener("release", () => {
+            if (document.visibilityState === "visible") {
+              // fire and forget
+              requestWakeLock().catch(() => {});
+            }
+          });
+          wakeLockRef.current = sentinel;
+        }
+      } catch (e) {
+        // Wake lock request failed - silently fail
+        // This can happen if battery is low or permission denied
+      }
+    };
+
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === "visible") {
+        await requestWakeLock();
+      }
+    };
+
+    // Request wake lock immediately
+    requestWakeLock();
+
+    // Re-request when page becomes visible again
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      try {
+        wakeLockRef.current?.release();
+      } catch {}
+      wakeLockRef.current = null;
+    };
+  }, [room]);
 
   const isHost = room && playerId && room.host_player_id === playerId;
   const me = useMemo(
@@ -414,28 +464,92 @@ export default function RoomPage() {
 
   function copyCode() {
     if (!room) return;
-    try {
-      navigator.clipboard?.writeText(room.code);
-      setCodeCopied(true);
-      setTimeout(() => setCodeCopied(false), 2000);
-    } catch {}
+    copyTextToClipboard(room.code)
+      .then((ok) => {
+        if (ok) {
+          setCodeCopied(true);
+          setTimeout(() => setCodeCopied(false), 2000);
+        } else {
+          alert("Copy failed");
+        }
+      })
+      .catch(() => alert("Copy failed"));
   }
 
   function copyInvite() {
     if (!room) return;
+    const url = `${location.origin}/room/${room.code}`;
+    copyTextToClipboard(url)
+      .then((ok) => {
+        if (ok) {
+          setLinkCopied(true);
+          setTimeout(() => setLinkCopied(false), 2000);
+        } else {
+          alert("Copy failed");
+        }
+      })
+      .catch(() => alert("Copy failed"));
+  }
+
+  async function copyTextToClipboard(text) {
     try {
-      const url = `${location.origin}/room/${room.code}`;
-      navigator.clipboard?.writeText(url);
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
+      if (
+        typeof navigator !== "undefined" &&
+        navigator.clipboard &&
+        window.isSecureContext
+      ) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
     } catch {}
+    try {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "absolute";
+      textarea.style.left = "-9999px";
+      document.body.appendChild(textarea);
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      const ok = document.execCommand("copy");
+      document.body.removeChild(textarea);
+      return !!ok;
+    } catch {}
+    return false;
+  }
+
+  async function handleEndGame() {
+    if (!room || !game || !playerId || !isHost) return;
+    const confirmed = confirm(
+      "Are you sure you want to end this game? This cannot be undone."
+    );
+    if (!confirmed) return;
+
+    setSidebarOpen(false);
+    try {
+      const res = await fetch("/api/end-game", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomId: room.id,
+          gameId: game.id,
+          playerId,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.error || "Failed to end game");
+      }
+    } catch (e) {
+      alert("Failed to end game");
+    }
   }
 
   const content = () => {
     if (loading)
       return (
         <div className="min-h-dvh grid place-items-center">
-          <div className="text-gray-400 text-sm">Loading...</div>
+          <div className="text-zinc-500 text-2xl">Loading...</div>
         </div>
       );
     if (!room)
@@ -460,17 +574,19 @@ export default function RoomPage() {
         <div className="h-dvh overflow-y-auto text-white px-4 py-6">
           <div className="max-w-2xl mx-auto">
             <div className="mb-6">
-              <h1 className="text-3xl font-bold mb-1 bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
+              <h1 className="text-xl font-bold mb-1 bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
                 SneakyLink
               </h1>
-              <p className="text-sm text-gray-400">
-                {isHost ? "You're the host" : ""}
-              </p>
             </div>
 
             <div className="space-y-4">
+              {isHost && (
+                <div className="text-sm pl-1 tracking-wider text-gray-500">
+                  You&apos;re the host
+                </div>
+              )}
               <div className="bg-zinc-900/60 backdrop-blur rounded-2xl p-4 border border-white/5">
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center justify-between">
                   <div>
                     <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
                       ROOM CODE
@@ -484,26 +600,35 @@ export default function RoomPage() {
                         className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition-colors"
                       >
                         {codeCopied ? (
-                          <Check className="w-4 h-4 text-emerald-500" />
+                          <Check className="w-4 h-4 text-green-500" />
                         ) : (
                           <Copy className="w-4 h-4" />
                         )}
                       </button>
                     </div>
                   </div>
-                  <button
-                    onClick={copyInvite}
-                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-semibold transition-colors flex items-center gap-2"
-                  >
-                    {linkCopied && <Check className="w-4 h-4" />}
-                    Share Link
-                  </button>
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
+                      Link to this game
+                    </div>
+                    <div className="flex items-center justify-end">
+                      <button
+                        onClick={copyInvite}
+                        className="text-lg text-blue-500 font-semibold flex items-center gap-2"
+                      >
+                        {linkCopied && (
+                          <Check className="w-5 h-5 text-green-500" />
+                        )}
+                        <span>Copy Link</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
               <div
                 className={`grid gap-3 ${
-                  numTeams === 3 ? "grid-cols-3" : "grid-cols-2"
+                  numTeams === 3 ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-2"
                 }`}
               >
                 <div className="bg-linear-to-br from-emerald-950/50 to-emerald-900/20 rounded-2xl border border-emerald-900/40 overflow-hidden">
@@ -654,7 +779,7 @@ export default function RoomPage() {
                 <div className="bg-zinc-900/60 backdrop-blur rounded-2xl p-4 border border-white/5">
                   <div className="flex items-center justify-between gap-4 flex-wrap">
                     <div className="text-sm text-gray-400">Your team</div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-nowrap">
                       <button
                         onClick={() => switchTeam("A")}
                         className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
@@ -680,7 +805,7 @@ export default function RoomPage() {
                           onClick={() => switchTeam("C")}
                           className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
                             myTeam === "C"
-                              ? "bg-rose-600 text-white"
+                              ? "bg-rose-600/80 text-white"
                               : "bg-zinc-800 text-gray-400 hover:bg-zinc-700"
                           }`}
                         >
@@ -706,7 +831,7 @@ export default function RoomPage() {
                           onClick={() => updateSettings({ teams: 2 })}
                           className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
                             numTeams === 2
-                              ? "bg-emerald-600 text-white"
+                              ? "bg-blue-600 text-white"
                               : "text-gray-400 hover:text-white"
                           }`}
                         >
@@ -716,7 +841,7 @@ export default function RoomPage() {
                           onClick={() => updateSettings({ teams: 3 })}
                           className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
                             numTeams === 3
-                              ? "bg-emerald-600 text-white"
+                              ? "bg-blue-600 text-white"
                               : "text-gray-400 hover:text-white"
                           }`}
                         >
@@ -733,7 +858,7 @@ export default function RoomPage() {
                           onClick={() => updateSettings({ win_sequences: 1 })}
                           className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
                             (room.settings?.win_sequences ?? 2) === 1
-                              ? "bg-emerald-600 text-white"
+                              ? "bg-blue-600 text-white"
                               : "text-gray-400 hover:text-white"
                           }`}
                         >
@@ -743,7 +868,7 @@ export default function RoomPage() {
                           onClick={() => updateSettings({ win_sequences: 2 })}
                           className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
                             (room.settings?.win_sequences ?? 2) === 2
-                              ? "bg-emerald-600 text-white"
+                              ? "bg-blue-600 text-white"
                               : "text-gray-400 hover:text-white"
                           }`}
                         >
@@ -767,7 +892,7 @@ export default function RoomPage() {
                   <button
                     onClick={startGame}
                     disabled={starting || !balanced}
-                    className="w-full py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-bold shadow-xl disabled:shadow-none transition-all"
+                    className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-bold shadow-xl disabled:shadow-none transition-all"
                   >
                     {starting ? "Starting..." : "Start Game"}
                   </button>
@@ -839,37 +964,37 @@ export default function RoomPage() {
               <div className="mb-8">
                 <div
                   className={`inline-flex items-center justify-center w-20 h-20 rounded-full mb-4 ${
-                    winnerColor === "emerald"
-                      ? "bg-emerald-500/20 ring-4 ring-emerald-500/30"
-                      : winnerColor === "sky"
-                      ? "bg-sky-500/20 ring-4 ring-sky-500/30"
-                      : "bg-rose-500/20 ring-4 ring-rose-500/30"
+                    isWinner
+                      ? "bg-amber-500/20 ring-4 ring-amber-500/30"
+                      : "bg-zinc-500/15 ring-4 ring-zinc-500/30"
                   }`}
                 >
-                  <span className="text-4xl">🎉</span>
+                  {isWinner ? (
+                    <Trophy className="w-10 h-10 text-yellow-500" />
+                  ) : (
+                    <Frown className="w-10 h-10 text-zinc-300" />
+                  )}
                 </div>
                 <h1 className="text-4xl font-bold mb-2 bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
-                  {isWinner ? "You Won!" : "Game Over"}
+                  {isWinner ? "You Won!" : winner ? "Game Over!" : "Game Ended"}
                 </h1>
                 <p
                   className={`text-xl font-semibold mb-1 ${
-                    winnerColor === "emerald"
+                    winner === "A"
                       ? "text-emerald-400"
-                      : winnerColor === "sky"
+                      : winner === "B"
                       ? "text-sky-400"
-                      : "text-rose-400"
+                      : winner === "C"
+                      ? "text-rose-400"
+                      : "text-gray-400"
                   }`}
                 >
-                  Team {winner} Wins!
-                </p>
-                <p className="text-gray-400 text-sm">
-                  {winnerName} completed {winSeqCount} sequence
-                  {winSeqCount > 1 ? "s" : ""}
+                  {winner ? `Team ${winner} Wins` : "No winner"}
                 </p>
               </div>
 
               <div className="bg-zinc-900/60 backdrop-blur rounded-2xl p-6 border border-white/5 mb-6">
-                <h3 className="text-sm text-gray-400 mb-3">Final Scores</h3>
+                <h3 className="text-xl text-gray-300 mb-4">Final Scores</h3>
                 <div className="space-y-2">
                   <div className="flex items-center justify-between px-4 py-2 rounded-lg bg-emerald-500/10">
                     <span className="text-emerald-400 font-semibold">
@@ -894,7 +1019,7 @@ export default function RoomPage() {
 
               <button
                 onClick={() => router.push("/")}
-                className="w-full py-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold shadow-lg shadow-emerald-600/20 transition-all"
+                className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg shadow-blue-600/20"
               >
                 Back to Home
               </button>
@@ -921,13 +1046,109 @@ export default function RoomPage() {
       targetSquare != null &&
       myTurn &&
       allowed?.has(targetSquare);
-    const canDead = selectedCard && isCardDead(selectedCard) && myTurn;
+    const canDead =
+      selectedCard &&
+      isCardDead(selectedCard) &&
+      myTurn &&
+      !posting &&
+      targetSquare == null;
     const highlight = new Set();
     if (targetSquare != null) highlight.add(targetSquare);
 
+    // Compute teams and scores for sidebar
+    const sidebarTeams = game
+      ? {
+          A: players
+            .filter((p) => p.team === "A")
+            .map((p) => ({
+              id: p.id,
+              name: p.name,
+              isYou: p.id === playerId,
+              isHost: p.id === room.host_player_id,
+            })),
+          B: players
+            .filter((p) => p.team === "B")
+            .map((p) => ({
+              id: p.id,
+              name: p.name,
+              isYou: p.id === playerId,
+              isHost: p.id === room.host_player_id,
+            })),
+          C:
+            (room?.settings?.teams ?? 2) === 3
+              ? players
+                  .filter((p) => p.team === "C")
+                  .map((p) => ({
+                    id: p.id,
+                    name: p.name,
+                    isYou: p.id === playerId,
+                    isHost: p.id === room.host_player_id,
+                  }))
+              : [],
+        }
+      : null;
+
+    // Calculate actual sequence counts using same logic as server
+    const calculateSequenceCount = (team) => {
+      const used = new Set();
+      let count = 0;
+      const nonCorner = (line) => line.filter((i) => !cornerIndex(i));
+      for (const line of ALL_LINES) {
+        let ok = true;
+        for (const idx of line) {
+          if (cornerIndex(idx)) continue;
+          if (chips.get(idx) !== team) {
+            ok = false;
+            break;
+          }
+        }
+        if (!ok) continue;
+        let overlap = 0;
+        for (const idx of nonCorner(line)) {
+          if (used.has(idx)) overlap++;
+          if (overlap > 1) break;
+        }
+        if (overlap <= 1) {
+          count++;
+          for (const idx of nonCorner(line)) used.add(idx);
+        }
+      }
+      return count;
+    };
+
+    const sidebarScores = game
+      ? (room?.settings?.teams ?? 2) === 3
+        ? {
+            A: calculateSequenceCount("A"),
+            B: calculateSequenceCount("B"),
+            C: calculateSequenceCount("C"),
+          }
+        : {
+            A: calculateSequenceCount("A"),
+            B: calculateSequenceCount("B"),
+          }
+      : null;
+
     return (
       <>
-        <Header centerLabel="SneakyLink" />
+        <Sidebar
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+          teams={sidebarTeams}
+          scores={sidebarScores}
+          isHost={isHost}
+          onShowRules={() => {
+            setSidebarOpen(false);
+            setRulesOpen(true);
+          }}
+          onEndGame={handleEndGame}
+        />
+        <RulesModal isOpen={rulesOpen} onClose={() => setRulesOpen(false)} />
+        <Header
+          centerLabel="SneakyLink"
+          onMenuClick={() => setSidebarOpen(true)}
+          onRulesClick={() => setRulesOpen(true)}
+        />
         <div className="min-h-[calc(100dvh-85px)] grid place-items-center pt-2 pb-[calc(env(safe-area-inset-bottom)+120px)]">
           <BoardGrid
             chips={chips}
@@ -953,6 +1174,7 @@ export default function RoomPage() {
           canDead={canDead}
           turnUsername={turnPlayer?.name || `Team ${game?.current_team}`}
           teamColorClass={teamColor}
+          myTeamColor={myTeamColor}
           myTurn={myTurn}
         />
       </>
