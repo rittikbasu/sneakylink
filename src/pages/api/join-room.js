@@ -3,17 +3,33 @@ import { supabaseAdmin } from "@/lib/supabaseAdmin";
 export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
-  const { name, code } = req.body || {};
-  if (!name || !code)
-    return res.status(400).json({ error: "Name and code are required" });
+  const { name, code, player_id: rejoinPlayerId } = req.body || {};
+  if (!code) return res.status(400).json({ error: "Code is required" });
 
   const { data: room, error: roomErr } = await supabaseAdmin
     .from("rooms")
-    .select("id, code, status")
+    .select("id, code, status, settings")
     .eq("code", code)
     .single();
   if (roomErr || !room)
     return res.status(404).json({ error: "Room not found" });
+
+  // Rejoin path: if client provides a known player_id, allow entry regardless of room status
+  if (rejoinPlayerId) {
+    const { data: existing, error: existingErr } = await supabaseAdmin
+      .from("players")
+      .select("id")
+      .eq("id", rejoinPlayerId)
+      .eq("room_id", room.id)
+      .single();
+    if (existingErr || !existing)
+      return res.status(404).json({ error: "Player not found in this room" });
+    return res
+      .status(200)
+      .json({ code: room.code, room_id: room.id, player_id: rejoinPlayerId });
+  }
+
+  if (!name) return res.status(400).json({ error: "Name is required to join" });
   if (room.status !== "lobby")
     return res.status(400).json({ error: "Game already started" });
 

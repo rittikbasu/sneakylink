@@ -40,6 +40,9 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create room");
+      try {
+        localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
+      } catch {}
       router.push(`/room/${data.code}?pid=${data.player_id}`);
     } catch (e) {
       console.error(e);
@@ -53,16 +56,29 @@ export default function Home() {
     if (!name.trim() || !code.trim()) return;
     setSubmitting(true);
     try {
+      const roomCode = code.trim().toUpperCase();
+      // If we've already joined this room on this device, reuse player_id
+      try {
+        const existingPid = localStorage.getItem(`seq_pid:${roomCode}`);
+        if (existingPid) {
+          router.push(`/room/${roomCode}?pid=${existingPid}`);
+          return;
+        }
+      } catch {}
+
       const res = await fetch("/api/join-room", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          code: code.trim().toUpperCase(),
+          code: roomCode,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to join room");
+      try {
+        localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
+      } catch {}
       router.push(`/room/${data.code}?pid=${data.player_id}`);
     } catch (e) {
       console.error(e);
@@ -96,7 +112,7 @@ export default function Home() {
             </p>
           </div>
 
-          <div className="bg-zinc-900/60 backdrop-blur rounded-2xl p-5 space-y-4 border border-white/5">
+          <div className="bg-zinc-900/40 backdrop-blur rounded-2xl p-5 space-y-4 border border-white/5 shadow-[0_0_24px_4px_rgba(59,130,246,0.45)]">
             <div>
               <label className="block text-sm text-zinc-400 mb-2">
                 Your name
@@ -117,7 +133,7 @@ export default function Home() {
 
             <button
               onClick={onCreate}
-              className="w-full py-3.5 rounded-xl bg-zinc-950 border border-blue-500/10 hover:bg-blue-500 text-white font-semibold shadow-[0_0_24px_4px_rgba(59,130,246,0.45)] hover:shadow-[0_0_36px_8px_rgba(59,130,246,0.6)] transition-shadow"
+              className="w-full py-3.5 rounded-xl bg-zinc-950 border border-blue-700/20 text-white font-semibold"
             >
               Create New Game
             </button>
