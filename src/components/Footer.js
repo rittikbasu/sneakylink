@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import PlayingCard from "@/components/PlayingCard";
 import { parseCard } from "@/lib/deck";
+import { hapticTap, hapticConfirm } from "@/lib/haptics";
 // no icons currently used
 
 export default function Footer({
@@ -72,7 +73,10 @@ export default function Footer({
                   <button
                     key={`${cardStr}-${i}`}
                     type="button"
-                    onClick={() => onCardSelect?.(cardStr)}
+                    onClick={() => {
+                      hapticTap();
+                      onCardSelect?.(cardStr);
+                    }}
                     style={
                       cellPx
                         ? { width: `${Math.max(40, Math.min(cellPx, 56))}px` }
@@ -126,7 +130,10 @@ export default function Footer({
           ) : (
             <button
               type="button"
-              onClick={onConfirmMove}
+              onClick={() => {
+                if (canConfirm) hapticConfirm();
+                onConfirmMove?.();
+              }}
               disabled={!canConfirm}
               style={
                 cellPx

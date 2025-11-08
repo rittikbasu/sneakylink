@@ -1,7 +1,9 @@
+import React, { memo } from "react";
 import layout from "@/data/boardLayout";
 import PlayingCard from "@/components/PlayingCard";
+import { hapticTap } from "@/lib/haptics";
 
-export default function BoardGrid({
+function BoardGridInner({
   chips = new Map(),
   onSquareClick,
   highlight = new Set(),
@@ -24,7 +26,12 @@ export default function BoardGrid({
               <button
                 key={idx}
                 type="button"
-                onClick={() => (canClick ? onSquareClick(idx) : null)}
+                onClick={() => {
+                  if (canClick) {
+                    hapticTap();
+                    onSquareClick(idx);
+                  }
+                }}
                 className={`relative group focus:outline-none ${
                   canClick ? "cursor-pointer" : "cursor-default"
                 } ${allowed ? (isAllowed ? "" : "opacity-50") : ""}`}
@@ -72,3 +79,20 @@ export default function BoardGrid({
     </div>
   );
 }
+
+const areEqual = (prev, next) => {
+  // Shallow compare props likely to change; Maps/Sets reference compare is fine if caller memoizes.
+  return (
+    prev.chips === next.chips &&
+    prev.onSquareClick === next.onSquareClick &&
+    prev.highlight === next.highlight &&
+    prev.allowed === next.allowed &&
+    prev.seqA === next.seqA &&
+    prev.seqB === next.seqB &&
+    prev.seqC === next.seqC &&
+    prev.highlightColor === next.highlightColor
+  );
+};
+
+const BoardGrid = memo(BoardGridInner, areEqual);
+export default BoardGrid;
