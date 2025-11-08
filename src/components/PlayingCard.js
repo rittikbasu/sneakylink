@@ -1,4 +1,4 @@
-import { Club, Spade, Diamond, Heart } from "lucide-react";
+import { Club, Spade, Diamond, Heart, Eye } from "lucide-react";
 
 const suitIconByName = {
   club: Club,
@@ -27,6 +27,15 @@ export default function PlayingCard({ type, rank, suit, interactive = true }) {
 
   const Icon = suitIconByName[suit];
   const suitColor = suitColorByName[suit];
+  const isJack = rank === "J";
+  const isTwoEyed = isJack && (suit === "club" || suit === "diamond");
+  const isOneEyed = isJack && (suit === "spade" || suit === "heart");
+  const jackColor = isTwoEyed
+    ? "text-amber-400"
+    : isOneEyed
+    ? "text-red-400"
+    : "";
+  const cornerColor = isJack ? jackColor : suitColor;
 
   return (
     <div
@@ -36,17 +45,31 @@ export default function PlayingCard({ type, rank, suit, interactive = true }) {
       }
     >
       <div
-        className={`absolute top-px left-1 ${suitColor} text-[10px] sm:text-xs font-semibold select-none`}
+        className={`absolute top-px left-1 ${cornerColor} text-[10px] sm:text-xs font-semibold select-none`}
       >
         {rank}
       </div>
       <div
-        className={`absolute bottom-px right-1 ${suitColor} text-[10px] sm:text-xs font-semibold select-none`}
+        className={`absolute bottom-px right-1 ${cornerColor} text-[10px] sm:text-xs font-semibold select-none`}
       >
         <span className="inline-block rotate-180">{rank}</span>
       </div>
       <div className="h-full w-full grid place-items-center">
-        {Icon ? (
+        {isJack ? (
+          <div className={`flex items-center ${jackColor}`}>
+            {isTwoEyed ? (
+              <>
+                <Eye className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2.3} />
+                <Eye
+                  className="w-5 h-5 sm:w-6 sm:h-6 -ml-1"
+                  strokeWidth={2.3}
+                />
+              </>
+            ) : (
+              <Eye className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2.3} />
+            )}
+          </div>
+        ) : Icon ? (
           <Icon
             className={`${suitColor} w-5 h-5 sm:w-6 sm:h-6`}
             strokeWidth={2.3}
