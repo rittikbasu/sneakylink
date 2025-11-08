@@ -5,11 +5,16 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   const { name, code, player_id: rejoinPlayerId } = req.body || {};
   if (!code) return res.status(400).json({ error: "Code is required" });
+  const normalizedCode = String(code).toUpperCase();
+  const normalizeName = (s) =>
+    String(s || "")
+      .trim()
+      .slice(0, 16);
 
   const { data: room, error: roomErr } = await supabaseAdmin
     .from("rooms")
     .select("id, code, status, settings")
-    .eq("code", code)
+    .eq("code", normalizedCode)
     .single();
   if (roomErr || !room)
     return res.status(404).json({ error: "Room not found" });
@@ -30,6 +35,8 @@ export default async function handler(req, res) {
   }
 
   if (!name) return res.status(400).json({ error: "Name is required to join" });
+  const normalizedName = normalizeName(name);
+  if (!normalizedName) return res.status(400).json({ error: "Invalid name" });
   if (room.status !== "lobby")
     return res.status(400).json({ error: "Game already started" });
 
@@ -59,7 +66,7 @@ export default async function handler(req, res) {
     .from("players")
     .insert({
       room_id: room.id,
-      name: name.trim(),
+      name: normalizedName,
       team,
       seat_index,
       is_host: false,
