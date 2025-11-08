@@ -20,7 +20,7 @@ export default function Header({
           </button>
         </div>
         {/* Center: Title */}
-        <div className="justify-self-center text-xl sm:text-base font-semibold bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
+        <div className="justify-self-center text-2xl sm:text-base font-semibold bg-linear-to-b from-white/90 via-blue-200 to-blue-500 bg-clip-text text-transparent">
           {centerLabel}
         </div>
         {/* Right: ScrollText button */}

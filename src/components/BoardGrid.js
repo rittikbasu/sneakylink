@@ -13,7 +13,7 @@ export default function BoardGrid({
 }) {
   return (
     <div className="w-full max-w-screen-sm sm:max-w-3xl md:max-w-5xl mx-auto px-2 sm:px-4">
-      <div className="rounded-xl p-2 sm:p-3 bg-white/60 dark:bg-zinc-900/60 ring-1 ring-black/5 dark:ring-white/10 shadow-sm">
+      <div className="rounded-xl p-2 sm:p-3 bg-linear-to-b from-black via-blue-900/40 to-blue-950/20 ring-1 ring-white/10 shadow-[0_0_24px_4px_rgba(59,130,246,0.10)]">
         <div id="board-grid" className="grid grid-cols-10 gap-1.5 sm:gap-2">
           {layout.map((cell, idx) => {
             const chip = chips.get(idx);

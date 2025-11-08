@@ -137,7 +137,7 @@ export default function Footer({
               }
               className={
                 (cellPx ? "" : "h-14 sm:h-16 md:h-[78px] ") +
-                "shrink-0 w-28 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-base font-semibold transition-colors flex items-center justify-center"
+                "shrink-0 w-28 rounded-lg bg-linear-to-b from-blue-600 via-blue-500 to-blue-400/70 disabled:opacity-40 disabled:cursor-not-allowed text-white text-base font-semibold transition-colors flex items-center justify-center"
               }
             >
               <span className="text-center leading-tight">
