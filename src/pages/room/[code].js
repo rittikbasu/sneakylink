@@ -13,7 +13,8 @@ import { ALL_LINES } from "@/lib/lines";
 
 export default function RoomPage() {
   const router = useRouter();
-  const { code } = router.query;
+  const rawCode = router.query?.code;
+  const code = typeof rawCode === "string" ? rawCode.toUpperCase() : undefined;
   const playerId =
     typeof router.query?.pid === "string" ? router.query.pid : null;
 
@@ -213,16 +214,27 @@ export default function RoomPage() {
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "moves" },
+        { event: "INSERT", schema: "public", table: "moves" },
         (payload) => {
-          const row = payload.new ?? payload.old;
+          const row = payload.new;
           if (!game || row?.game_id !== game.id) return;
-          supabase
-            .from("moves")
-            .select("turn_index, move_type, coord, team, card, created_at")
-            .eq("game_id", game.id)
-            .order("turn_index", { ascending: true })
-            .then(({ data }) => setMoves(data || []));
+          setMoves((prev) => {
+            const next = Array.isArray(prev) ? [...prev] : [];
+            // Avoid duplicates by turn_index
+            if (!next.find((m) => m.turn_index === row.turn_index)) {
+              next.push({
+                turn_index: row.turn_index,
+                move_type: row.move_type,
+                coord: row.coord,
+                team: row.team,
+                card: row.card,
+                created_at: row.created_at,
+                player_id: row.player_id,
+              });
+              next.sort((a, b) => a.turn_index - b.turn_index);
+            }
+            return next;
+          });
         }
       )
       .subscribe();
@@ -283,6 +295,12 @@ export default function RoomPage() {
     () => players.find((p) => p.id === playerId) || null,
     [players, playerId]
   );
+  const highlight = useMemo(() => {
+    if (targetSquare == null) return new Set();
+    const s = new Set();
+    s.add(targetSquare);
+    return s;
+  }, [targetSquare]);
   const playersBySeat = useMemo(
     () =>
       [...players].sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
@@ -309,6 +327,72 @@ export default function RoomPage() {
       }
     }
     return m;
+  }
+
+  // Client-side copy of server winner evaluation to avoid mismatch
+  function isCorner(idx) {
+    const r = Math.floor(idx / 10);
+    const c = idx % 10;
+    return (
+      (r === 0 && c === 0) ||
+      (r === 0 && c === 9) ||
+      (r === 9 && c === 0) ||
+      (r === 9 && c === 9)
+    );
+  }
+  function countSequencesWithOverlapConstraintClient(
+    occBefore,
+    occAfter,
+    team
+  ) {
+    const existingLines = [];
+    for (const line of ALL_LINES) {
+      let ok = true;
+      for (const idx of line) {
+        if (isCorner(idx)) continue;
+        const o = occBefore.get(idx);
+        if (!o || o.team !== team) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) existingLines.push(line);
+    }
+    const used = new Set();
+    const nonCorner = (line) => line.filter((i) => !isCorner(i));
+    for (const line of existingLines) {
+      for (const idx of nonCorner(line)) used.add(idx);
+    }
+    const candidate = [];
+    for (const line of ALL_LINES) {
+      // complete in after state?
+      let ok = true;
+      for (const idx of line) {
+        if (isCorner(idx)) continue;
+        const o = occAfter.get(idx);
+        if (!o || o.team !== team) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) candidate.push(line);
+    }
+    // remove those already existing
+    const existingKey = new Set(existingLines.map((l) => l.join("-")));
+    const newOnly = candidate.filter((l) => !existingKey.has(l.join("-")));
+    let accepted = 0;
+    for (const line of newOnly) {
+      let overlap = 0;
+      for (const idx of nonCorner(line)) {
+        if (used.has(idx)) overlap++;
+        if (overlap > 1) break;
+      }
+      if (overlap <= 1) {
+        accepted++;
+        for (const idx of nonCorner(line)) used.add(idx);
+      }
+    }
+    return existingLines.length + accepted;
   }
 
   function cornerIndex(idx) {
@@ -525,7 +609,7 @@ export default function RoomPage() {
   async function updateSettings(newSettings) {
     if (!room || !playerId || !isHost) return;
     try {
-      await fetch("/api/update-settings", {
+      const res = await fetch("/api/update-settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -534,6 +618,17 @@ export default function RoomPage() {
           settings: newSettings,
         }),
       });
+      // Optimistic UI: reflect change immediately; realtime will confirm
+      if (res.ok) {
+        setRoom((prev) =>
+          prev
+            ? {
+                ...prev,
+                settings: { ...(prev.settings || {}), ...newSettings },
+              }
+            : prev
+        );
+      }
     } catch {}
   }
 
@@ -990,6 +1085,7 @@ export default function RoomPage() {
       const chips = computeChips();
       const { seqA, seqB, seqC } = computeSequenceSets(chips);
       const winSeqCount = room?.settings?.win_sequences ?? 2;
+      // Compute final counts (display)
       const nonCorner = (line) => line.filter((i) => !cornerIndex(i));
       const acceptedCount = (team) => {
         const used = new Set();
@@ -1020,14 +1116,54 @@ export default function RoomPage() {
       const bCount = acceptedCount("B");
       const cCount = acceptedCount("C");
 
+      // Authoritative winner calculation aligned with server:
+      // take last placing move, compare before/after with overlap rule.
+      const lastPlace = [...moves]
+        .filter((m) => m.move_type === "place")
+        .sort((a, b) => b.turn_index - a.turn_index)[0];
       let winner = null;
-      if (aCount >= winSeqCount) winner = "A";
-      else if (bCount >= winSeqCount) winner = "B";
-      else if (cCount >= winSeqCount) winner = "C";
+      if (lastPlace) {
+        const occBefore = new Map();
+        const occAfter = new Map();
+        for (const mv of moves) {
+          if (mv.turn_index >= lastPlace.turn_index) continue;
+          if (mv.move_type === "place") {
+            const [r, c] = mv.coord.split(",").map((n) => parseInt(n, 10));
+            occBefore.set(r * 10 + c, { team: mv.team });
+            occAfter.set(r * 10 + c, { team: mv.team });
+          } else if (mv.move_type === "remove") {
+            const [r, c] = mv.coord.split(",").map((n) => parseInt(n, 10));
+            occBefore.delete(r * 10 + c);
+            occAfter.delete(r * 10 + c);
+          }
+        }
+        // add last move to after
+        const [lr, lc] = lastPlace.coord.split(",").map((n) => parseInt(n, 10));
+        occAfter.set(lr * 10 + lc, { team: lastPlace.team });
+        // lock corners
+        [0, 9, 90, 99].forEach((i) => {
+          occBefore.set(i, { team: "corner" });
+          occAfter.set(i, { team: "corner" });
+        });
+        const seqAfter = countSequencesWithOverlapConstraintClient(
+          occBefore,
+          occAfter,
+          lastPlace.team
+        );
+        if (seqAfter >= winSeqCount) winner = lastPlace.team;
+      }
 
-      const winnerName = winner
-        ? players.find((p) => p.team === winner)?.name || `Team ${winner}`
-        : "Unknown";
+      const aPlayers = players.filter((p) => p.team === "A");
+      const bPlayers = players.filter((p) => p.team === "B");
+      const cPlayers = players.filter((p) => p.team === "C");
+      const activeTeams = room?.settings?.teams ?? 2;
+      const isSolo =
+        (activeTeams === 2 && aPlayers.length === 1 && bPlayers.length === 1) ||
+        (activeTeams === 3 &&
+          aPlayers.length === 1 &&
+          bPlayers.length === 1 &&
+          cPlayers.length === 1);
+      const soloWinnerName = players.find((p) => p.team === winner)?.name;
       const winnerColor =
         winner === "A" ? "emerald" : winner === "B" ? "sky" : "rose";
       const isWinner = me?.team === winner;
@@ -1064,7 +1200,11 @@ export default function RoomPage() {
                       : "text-gray-400"
                   }`}
                 >
-                  {winner ? `Team ${winner} Wins` : "No winner"}
+                  {winner
+                    ? isSolo
+                      ? `${soloWinnerName || `Team ${winner}`} Wins`
+                      : `Team ${winner} Wins`
+                    : "No winner"}
                 </p>
               </div>
 
@@ -1073,18 +1213,20 @@ export default function RoomPage() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between px-4 py-2 rounded-lg bg-emerald-500/10">
                     <span className="text-emerald-400 font-semibold">
-                      Team A
+                      {(isSolo ? aPlayers[0]?.name : "Team A") || "Team A"}
                     </span>
                     <span className="text-emerald-400 font-bold">{aCount}</span>
                   </div>
                   <div className="flex items-center justify-between px-4 py-2 rounded-lg bg-sky-500/10">
-                    <span className="text-sky-400 font-semibold">Team B</span>
+                    <span className="text-sky-400 font-semibold">
+                      {(isSolo ? bPlayers[0]?.name : "Team B") || "Team B"}
+                    </span>
                     <span className="text-sky-400 font-bold">{bCount}</span>
                   </div>
                   {(room?.settings?.teams ?? 2) === 3 && (
                     <div className="flex items-center justify-between px-4 py-2 rounded-lg bg-rose-500/10">
                       <span className="text-rose-400 font-semibold">
-                        Team C
+                        {(isSolo ? cPlayers[0]?.name : "Team C") || "Team C"}
                       </span>
                       <span className="text-rose-400 font-bold">{cCount}</span>
                     </div>
@@ -1156,8 +1298,6 @@ export default function RoomPage() {
       myTurn &&
       !posting &&
       targetSquare == null;
-    const highlight = new Set();
-    if (targetSquare != null) highlight.add(targetSquare);
 
     // Compute teams and scores for sidebar
     const sidebarTeams = game
@@ -1310,11 +1450,13 @@ export default function RoomPage() {
                 }`}
                 value={tempName}
                 onChange={(e) => {
-                  setTempName(e.target.value);
+                  const v = e.target.value.replace(/\s+/g, "").slice(0, 16);
+                  setTempName(v);
                   if (nameError && e.target.value.trim()) setNameError(false);
                 }}
                 placeholder="Eg. Alex"
                 autoFocus
+                maxLength={16}
               />
               <button
                 onClick={submitNameJoin}
