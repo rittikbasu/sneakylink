@@ -199,8 +199,6 @@ export default async function handler(req, res) {
     .single();
   if (playerErr || !player)
     return res.status(404).json({ error: "Player not found" });
-  if (player.team !== game.current_team)
-    return res.status(403).json({ error: "Not your turn" });
 
   // Current hand
   const { data: handRow, error: handErr } = await supabaseAdmin
@@ -226,24 +224,35 @@ export default async function handler(req, res) {
   const deck = generateShuffledDeck(game.seed);
   let deckCursor = game.deck_cursor;
 
-  // Get room to determine team count
-  const { data: roomForTeams } = await supabaseAdmin
-    .from("rooms")
-    .select("settings")
-    .eq("id", game.room_id)
-    .single();
-  const numTeams = roomForTeams?.settings?.teams ?? 2;
+  // Build player turn order in round-robin by team (prevents consecutive teammates)
+  const { data: turnPlayers, error: turnPlayersErr } = await supabaseAdmin
+    .from("players")
+    .select("id, team, seat_index")
+    .eq("room_id", game.room_id)
+    .order("seat_index", { ascending: true });
+  if (turnPlayersErr || !turnPlayers || turnPlayers.length === 0) {
+    return res.status(400).json({ error: "No players in room" });
+  }
+  const grouped = {
+    A: turnPlayers.filter((p) => p.team === "A"),
+    B: turnPlayers.filter((p) => p.team === "B"),
+    C: turnPlayers.filter((p) => p.team === "C"),
+  };
+  const teamOrder = ["A", "B", "C"].filter((t) => grouped[t].length > 0);
+  const maxLen = Math.max(...teamOrder.map((t) => grouped[t].length));
+  const turnOrder = [];
+  for (let i = 0; i < maxLen; i++) {
+    for (const t of teamOrder) {
+      if (grouped[t][i]) turnOrder.push(grouped[t][i]);
+    }
+  }
+  const currentIndex = game.turn_index % turnOrder.length;
+  const expectedPlayerId = turnOrder[currentIndex].id;
+  const nextTeam = turnOrder[(currentIndex + 1) % turnOrder.length].team;
 
-  // Rotate team turn
-  let nextTeam;
-  if (numTeams === 2) {
-    nextTeam = game.current_team === "A" ? "B" : "A";
-  } else if (numTeams === 3) {
-    if (game.current_team === "A") nextTeam = "B";
-    else if (game.current_team === "B") nextTeam = "C";
-    else nextTeam = "A";
-  } else {
-    nextTeam = "A";
+  // Enforce exact player turn
+  if (playerId !== expectedPlayerId) {
+    return res.status(403).json({ error: "Not your turn" });
   }
 
   if (moveType === "place") {

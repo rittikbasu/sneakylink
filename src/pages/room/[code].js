@@ -14,11 +14,8 @@ import { ALL_LINES } from "@/lib/lines";
 export default function RoomPage() {
   const router = useRouter();
   const { code } = router.query;
-  const playerId = useMemo(() => {
-    if (typeof window === "undefined") return null;
-    const url = new URL(window.location.href);
-    return url.searchParams.get("pid");
-  }, []);
+  const playerId =
+    typeof router.query?.pid === "string" ? router.query.pid : null;
 
   const [room, setRoom] = useState(null);
   const [players, setPlayers] = useState([]);
@@ -35,6 +32,79 @@ export default function RoomPage() {
   const wakeLockRef = useRef(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [askNameOpen, setAskNameOpen] = useState(false);
+  const [tempName, setTempName] = useState("");
+  const [nameSubmitting, setNameSubmitting] = useState(false);
+  const [nameError, setNameError] = useState(false);
+  const deepLinkHandledRef = useRef(false);
+
+  // If no pid in URL, try to restore from localStorage; else prompt for name
+  useEffect(() => {
+    if (!code) return;
+    if (playerId) return;
+    if (deepLinkHandledRef.current) return;
+    deepLinkHandledRef.current = true;
+    (async () => {
+      try {
+        const savedPid = localStorage.getItem(`seq_pid:${code}`);
+        if (savedPid) {
+          router.replace(`/room/${code}?pid=${savedPid}`);
+          return;
+        }
+      } catch {}
+      try {
+        const savedName = localStorage.getItem("seq_name");
+        if (savedName && savedName.trim()) {
+          setNameSubmitting(true);
+          const res = await fetch("/api/join-room", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: savedName.trim(), code }),
+          });
+          const d = await res.json();
+          if (res.ok) {
+            try {
+              localStorage.setItem(`seq_pid:${d.code}`, d.player_id);
+            } catch {}
+            router.replace(`/room/${d.code}?pid=${d.player_id}`);
+            return;
+          }
+        }
+      } catch {}
+      // Fallback: prompt for name
+      setAskNameOpen(true);
+    })();
+  }, [code, playerId, router]);
+
+  async function submitNameJoin() {
+    if (!tempName.trim()) {
+      setNameError(true);
+      return;
+    }
+    setNameSubmitting(true);
+    try {
+      const res = await fetch("/api/join-room", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: tempName.trim(), code }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to join");
+        return;
+      }
+      try {
+        localStorage.setItem("seq_name", tempName.trim());
+        localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
+      } catch {}
+      setAskNameOpen(false);
+      router.replace(`/room/${data.code}?pid=${data.player_id}`);
+    } catch (e) {
+      alert("Failed to join");
+    } finally {
+      setNameSubmitting(false);
+    }
+  }
 
   useEffect(() => {
     if (!code) return;
@@ -212,6 +282,11 @@ export default function RoomPage() {
   const me = useMemo(
     () => players.find((p) => p.id === playerId) || null,
     [players, playerId]
+  );
+  const playersBySeat = useMemo(
+    () =>
+      [...players].sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
+    [players]
   );
   const myTurn =
     game && me && game.current_team === me.team && room?.status === "active";
@@ -1031,16 +1106,45 @@ export default function RoomPage() {
 
     const chips = computeChips();
     const { seqA, seqB, seqC } = computeSequenceSets(chips);
-    const turnPlayer = players.find((p) => p.team === game?.current_team);
+    // Build round-robin order by team to prevent consecutive teammates
+    const grouped = {
+      A: [...players]
+        .filter((p) => p.team === "A")
+        .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
+      B: [...players]
+        .filter((p) => p.team === "B")
+        .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
+      C: [...players]
+        .filter((p) => p.team === "C")
+        .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
+    };
+    const teamOrder = ["A", "B", "C"].filter((t) => grouped[t].length > 0);
+    const maxLen = Math.max(...teamOrder.map((t) => grouped[t].length));
+    const playersByTurn = [];
+    for (let i = 0; i < maxLen; i++) {
+      for (const t of teamOrder) {
+        if (grouped[t][i]) playersByTurn.push(grouped[t][i]);
+      }
+    }
+    const turnPlayer =
+      playersByTurn.length && game
+        ? playersByTurn[game.turn_index % playersByTurn.length]
+        : null;
     const teamColor =
-      game?.current_team === "A"
+      (turnPlayer?.team === "A"
         ? "text-emerald-500"
-        : game?.current_team === "B"
+        : turnPlayer?.team === "B"
         ? "text-sky-500"
-        : "text-rose-500";
+        : "text-rose-500") || "text-emerald-500";
     const myTeamColor =
       me?.team === "A" ? "emerald" : me?.team === "B" ? "sky" : "rose";
     const allowed = selectedCard ? allowedIndicesForSelectedCard() : null;
+    const myTurn =
+      game &&
+      me &&
+      turnPlayer &&
+      turnPlayer.id === me.id &&
+      room?.status === "active";
     const canConfirm =
       selectedCard &&
       targetSquare != null &&
@@ -1182,6 +1286,47 @@ export default function RoomPage() {
   };
 
   return (
-    <main className="h-dvh overflow-hidden text-neutral-100">{content()}</main>
+    <main className="h-dvh overflow-hidden text-neutral-100">
+      {content()}
+      {/* Global Name prompt modal (covers all stages) */}
+      {askNameOpen && !playerId && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" />
+          <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-sm z-50 rounded-2xl border border-white/10 bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_70%,black_100%)] backdrop-blur p-5 shadow-xl">
+            <div className="mb-4">
+              <div className="text-lg font-semibold bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
+                Enter your name
+              </div>
+              <div className="text-sm text-zinc-500">
+                You need a name to join this room
+              </div>
+            </div>
+            <div className="space-y-3">
+              <input
+                className={`w-full rounded-xl bg-zinc-800/80 text-white placeholder-zinc-600 border focus:outline-none focus:ring-1 px-4 py-3 ${
+                  nameError
+                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/50"
+                    : "border-zinc-700/50 focus:border-blue-500/50 focus:ring-blue-500/50"
+                }`}
+                value={tempName}
+                onChange={(e) => {
+                  setTempName(e.target.value);
+                  if (nameError && e.target.value.trim()) setNameError(false);
+                }}
+                placeholder="Eg. Alex"
+                autoFocus
+              />
+              <button
+                onClick={submitNameJoin}
+                disabled={nameSubmitting}
+                className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-semibold"
+              >
+                {nameSubmitting ? "Joining..." : "Join Game"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </main>
   );
 }
