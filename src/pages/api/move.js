@@ -224,26 +224,38 @@ export default async function handler(req, res) {
   const deck = generateShuffledDeck(game.seed);
   let deckCursor = game.deck_cursor;
 
-  // Build player turn order in round-robin by team (prevents consecutive teammates)
-  const { data: turnPlayers, error: turnPlayersErr } = await supabaseAdmin
-    .from("players")
-    .select("id, team, seat_index")
-    .eq("room_id", game.room_id)
-    .order("seat_index", { ascending: true });
-  if (turnPlayersErr || !turnPlayers || turnPlayers.length === 0) {
-    return res.status(400).json({ error: "No players in room" });
-  }
-  const grouped = {
-    A: turnPlayers.filter((p) => p.team === "A"),
-    B: turnPlayers.filter((p) => p.team === "B"),
-    C: turnPlayers.filter((p) => p.team === "C"),
-  };
-  const teamOrder = ["A", "B", "C"].filter((t) => grouped[t].length > 0);
-  const maxLen = Math.max(...teamOrder.map((t) => grouped[t].length));
-  const turnOrder = [];
-  for (let i = 0; i < maxLen; i++) {
-    for (const t of teamOrder) {
-      if (grouped[t][i]) turnOrder.push(grouped[t][i]);
+  // Build player turn order:
+  // Prefer persisted game.turn_order; fallback to grouped round-robin.
+  let turnOrder = [];
+  if (Array.isArray(game.turn_order) && game.turn_order.length > 0) {
+    const { data: allPlayers } = await supabaseAdmin
+      .from("players")
+      .select("id, team")
+      .eq("room_id", game.room_id);
+    const byId = new Map((allPlayers || []).map((p) => [p.id, p]));
+    turnOrder = game.turn_order
+      .map((pid) => ({ id: pid, team: byId.get(pid)?.team }))
+      .filter((p) => p.team);
+  } else {
+    const { data: turnPlayers, error: turnPlayersErr } = await supabaseAdmin
+      .from("players")
+      .select("id, team, seat_index")
+      .eq("room_id", game.room_id)
+      .order("seat_index", { ascending: true });
+    if (turnPlayersErr || !turnPlayers || turnPlayers.length === 0) {
+      return res.status(400).json({ error: "No players in room" });
+    }
+    const grouped = {
+      A: turnPlayers.filter((p) => p.team === "A"),
+      B: turnPlayers.filter((p) => p.team === "B"),
+      C: turnPlayers.filter((p) => p.team === "C"),
+    };
+    const teamOrder = ["A", "B", "C"].filter((t) => grouped[t].length > 0);
+    const maxLen = Math.max(...teamOrder.map((t) => grouped[t].length));
+    for (let i = 0; i < maxLen; i++) {
+      for (const t of teamOrder) {
+        if (grouped[t][i]) turnOrder.push(grouped[t][i]);
+      }
     }
   }
   const currentIndex = game.turn_index % turnOrder.length;

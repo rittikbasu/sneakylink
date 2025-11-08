@@ -45,6 +45,21 @@ export default async function handler(req, res) {
     }
   }
 
+  // Build persisted turn order (round-robin by team, by seat order)
+  const grouped = {
+    A: players.filter((p) => p.team === "A"),
+    B: players.filter((p) => p.team === "B"),
+    C: players.filter((p) => p.team === "C"),
+  };
+  const teamOrder = ["A", "B", "C"].filter((t) => grouped[t].length > 0);
+  const maxLen = Math.max(...teamOrder.map((t) => grouped[t].length));
+  const turnOrder = [];
+  for (let i = 0; i < maxLen; i++) {
+    for (const t of teamOrder) {
+      if (grouped[t][i]) turnOrder.push(grouped[t][i].id);
+    }
+  }
+
   // Create game
   // Validate teams are balanced
   const numTeams = room.settings?.teams ?? 2;
@@ -64,9 +79,11 @@ export default async function handler(req, res) {
       room_id: roomId,
       seed,
       turn_index: 0,
-      current_team: "A",
+      current_team: players.find((p) => p.id === turnOrder[0])?.team ?? "A",
       deck_cursor: cursor,
       discard_count: 0,
+      // If the column doesn't exist, Postgres will ignore; safe to include.
+      turn_order: turnOrder,
     })
     .select()
     .single();
