@@ -15,16 +15,26 @@ const ranks = [
   "2",
 ]; // J included for jacks
 
-function mulberry32(seed) {
-  let a = 0;
-  for (let i = 0; i < seed.length; i++) a = (a + seed.charCodeAt(i)) | 0;
-  let t = (a + 0x6d2b79f5) | 0;
+// Better seed mixing to avoid collisions on similar strings
+function xmur3(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
   return function () {
-    t |= 0;
-    t = (t + 0x6d2b79f5) | 0;
-    let r = Math.imul(t ^ (t >>> 15), 1 | t);
-    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
-    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    return (h ^= h >>> 16) >>> 0;
+  };
+}
+
+function mulberry32FromInt(a) {
+  return function () {
+    let t = (a += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), 1 | t);
+    t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
@@ -60,6 +70,7 @@ export function generateTwoDecks() {
 
 export function generateShuffledDeck(seed) {
   const base = generateTwoDecks();
-  const rnd = mulberry32(seed);
+  const seed32 = xmur3(String(seed))();
+  const rnd = mulberry32FromInt(seed32);
   return shuffle(base, rnd);
 }
