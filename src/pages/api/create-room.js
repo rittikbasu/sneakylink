@@ -5,7 +5,12 @@ export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
   const { name, settings } = req.body || {};
-  if (!name || typeof name !== "string" || !name.trim()) {
+  const normalizeName = (s) =>
+    String(s || "")
+      .trim()
+      .slice(0, 16);
+  const normalizedName = normalizeName(name);
+  if (!normalizedName) {
     return res.status(400).json({ error: "Name is required" });
   }
   const code = generateRoomCode(6);
@@ -27,7 +32,7 @@ export default async function handler(req, res) {
     .from("players")
     .insert({
       room_id: room.id,
-      name: name.trim(),
+      name: normalizedName,
       team: "A",
       seat_index: 0,
       is_host: true,
