@@ -16,10 +16,12 @@ export default function Home() {
   }, []);
 
   const persistName = (n) => {
-    setName(n);
-    if (n && n.trim()) setNameError(false);
+    // Normalize: allow spaces, but not at start or end. Cap to 16 chars.
+    const normalized = n.replace(/^\s+|\s+$/g, "").slice(0, 16);
+    setName(normalized);
+    if (normalized) setNameError(false);
     try {
-      localStorage.setItem("seq_name", n);
+      localStorage.setItem("seq_name", normalized);
     } catch {}
   };
 
@@ -128,6 +130,7 @@ export default function Home() {
                 onChange={(e) => persistName(e.target.value)}
                 placeholder="Eg. Alex"
                 autoComplete="off"
+                maxLength={16}
               />
             </div>
 
