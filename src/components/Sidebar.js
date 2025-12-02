@@ -186,10 +186,10 @@ export default function Sidebar({
           </div>
 
           {/* Footer Actions */}
-          <div className="p-4 border-t border-white/10 space-y-2">
+          <div className="p-4 border-t border-white/10 flex gap-2">
             <button
               onClick={onShowRules}
-              className="w-full py-3 rounded-lg bg-zinc-900 hover:bg-zinc-700 text-zinc-200 font-semibold transition-colors flex items-center justify-center gap-2"
+              className="flex-1 py-3 rounded-lg bg-zinc-900 hover:bg-zinc-700 text-zinc-200 font-semibold transition-colors flex items-center justify-center gap-2"
             >
               <ScrollText className="w-4 h-4 text-zinc-400" />
               Show Rules
@@ -197,7 +197,7 @@ export default function Sidebar({
             {isHost && (
               <button
                 onClick={onEndGame}
-                className="w-full py-3 rounded-lg bg-red-600/80 hover:bg-red-600 text-zinc-200 font-semibold transition-colors"
+                className="flex-1 py-3 rounded-lg bg-red-600/80 hover:bg-red-600 text-zinc-200 font-semibold transition-colors"
               >
                 End Game
               </button>

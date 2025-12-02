@@ -107,18 +107,23 @@ export default function RoomPage() {
     }
   }
 
+  // 1. Initial Load & Room Subscription (Stable)
   useEffect(() => {
     if (!code) return;
     let mounted = true;
+
     (async () => {
       const { data: roomRow } = await supabase
         .from("rooms")
         .select("*")
         .eq("code", code)
         .single();
+
       if (!mounted) return;
       setRoom(roomRow || null);
+
       if (roomRow) {
+        // Load initial players
         const { data: ps } = await supabase
           .from("players")
           .select("*")
@@ -126,6 +131,8 @@ export default function RoomPage() {
           .order("seat_index", { ascending: true });
         if (!mounted) return;
         setPlayers(ps || []);
+
+        // Load initial game
         const { data: gs } = await supabase
           .from("games")
           .select("*")
@@ -134,6 +141,7 @@ export default function RoomPage() {
           .limit(1);
         const g = gs && gs.length ? gs[0] : null;
         setGame(g);
+
         if (g && playerId) {
           const { data: handRow } = await supabase
             .from("hands")
@@ -153,6 +161,7 @@ export default function RoomPage() {
       setLoading(false);
     })();
 
+    // Subscribe to ROOM updates only (rarely changes)
     const roomSub = supabase
       .channel(`room-${code}`)
       .on(
@@ -167,62 +176,159 @@ export default function RoomPage() {
           if (payload.new) setRoom(payload.new);
         }
       )
+      .subscribe();
+
+    return () => {
+      mounted = false;
+      supabase.removeChannel(roomSub);
+    };
+  }, [code, playerId]); // Added playerId to dependencies so it loads hand correctly on mount
+
+  // 2. Players & Games Subscription (Depends on Room ID)
+  useEffect(() => {
+    if (!room?.id) return;
+
+    const channel = supabase
+      .channel(`lobby:${room.id}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "players" },
+        {
+          event: "*",
+          schema: "public",
+          table: "players",
+          filter: `room_id=eq.${room.id}`,
+        },
         (payload) => {
-          const row = payload.new ?? payload.old;
-          if (row?.room_id !== room?.id) return;
-          supabase
-            .from("players")
-            .select("*")
-            .eq("room_id", room?.id)
-            .order("seat_index", { ascending: true })
-            .then(({ data }) => setPlayers(data || []));
+          const type = payload.eventType;
+          const rowNew = payload.new;
+          const rowOld = payload.old;
+
+          if (type === "INSERT") {
+            setPlayers((prev) => {
+              const exists = prev.some((p) => p.id === rowNew.id);
+              if (exists) return prev;
+              const next = [...prev, rowNew];
+              next.sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0));
+              return next;
+            });
+          } else if (type === "UPDATE") {
+            setPlayers((prev) => {
+              const next = prev.map((p) =>
+                p.id === rowNew.id ? { ...p, ...rowNew } : p
+              );
+              next.sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0));
+              return next;
+            });
+          } else if (type === "DELETE") {
+            setPlayers((prev) => prev.filter((p) => p.id !== rowOld.id));
+          }
         }
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "games" },
+        {
+          event: "*",
+          schema: "public",
+          table: "games",
+          filter: `room_id=eq.${room.id}`,
+        },
         (payload) => {
-          const row = payload.new ?? payload.old;
-          if (row?.room_id !== room?.id) return;
-          supabase
-            .from("games")
-            .select("*")
-            .eq("room_id", room?.id)
-            .order("created_at", { ascending: false })
-            .limit(1)
-            .then(({ data }) => setGame(data && data.length ? data[0] : null));
+          // Direct update from payload - NO REFETCH
+          if (payload.new) {
+            setGame((prev) => {
+              // Only update if it's the current game or a newer one
+              if (!prev || payload.new.created_at >= prev.created_at) {
+                return payload.new;
+              }
+              return prev;
+            });
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [room?.id]); // Only re-runs if room ID changes (basically never)
+
+  // 3. Game-Specific Subscription: Hands & Moves (Depends on Game ID)
+  useEffect(() => {
+    if (!game?.id || !playerId) return;
+
+    // NOTE: Initial load moved to main useEffect to avoid double fetching,
+    // but we need to reload if game ID changes (new game started).
+    // We check if we already have data for this game to avoid redundant fetch.
+
+    // If we are switching to a new game, we should fetch initial state
+    const fetchGameState = async () => {
+      // Only fetch if we don't have hand/moves or if they belong to a different game (logic handled by dependency change)
+      // But to be safe/simple: always fetch when game.id changes.
+      // The main useEffect handles the *first* load. This handles *subsequent* games.
+      // Actually, main useEffect only runs on mount. So we DO need to fetch here if it's a new game.
+
+      // Optimization: check if current moves/hand match this game.id?
+      // React state update is async, so checking 'moves' might be stale.
+      // Relying on the fact that this effect runs when game.id changes is standard.
+
+      const { data: handRow } = await supabase
+        .from("hands")
+        .select("cards")
+        .eq("game_id", game.id)
+        .eq("player_id", playerId)
+        .single();
+      setHand(handRow?.cards || []);
+
+      const { data: ms } = await supabase
+        .from("moves")
+        .select("turn_index, move_type, coord, team, card, created_at")
+        .eq("game_id", game.id)
+        .order("turn_index", { ascending: true });
+      setMoves(ms || []);
+    };
+
+    // We can skip this fetch if we just loaded it in the main useEffect?
+    // It's tricky to coordinate. Let's rely on this effect for game state management
+    // and remove the game-specific fetch from the main useEffect to be cleaner?
+    // The user prompt kept it in main useEffect. Let's keep it there, but redundant fetch on mount is better than missing data.
+    // Actually, let's just run it. 1 fetch per game start is fine.
+    // The problem was 1 fetch per MOVE.
+    fetchGameState();
+
+    const channel = supabase
+      .channel(`game:${game.id}:${playerId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*", // Usually UPDATE
+          schema: "public",
+          table: "hands",
+          filter: `game_id=eq.${game.id}`,
+        },
+        (payload) => {
+          // Check if this hand belongs to us
+          if (payload.new && payload.new.player_id === playerId) {
+            // Direct update from payload - NO REFETCH
+            setHand(payload.new.cards || []);
+          }
         }
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "hands" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "moves",
+          filter: `game_id=eq.${game.id}`,
+        },
         (payload) => {
-          const row = payload.new ?? payload.old;
-          if (!game || row?.game_id !== game.id || row?.player_id !== playerId)
-            return;
-          supabase
-            .from("hands")
-            .select("cards")
-            .eq("game_id", game.id)
-            .eq("player_id", playerId)
-            .single()
-            .then(({ data }) => setHand(data?.cards || []));
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "moves" },
-        (payload) => {
+          // Direct update from payload - NO REFETCH
           const row = payload.new;
-          if (!game || row?.game_id !== game.id) return;
           setMoves((prev) => {
-            const next = Array.isArray(prev) ? [...prev] : [];
-            // Avoid duplicates by turn_index
-            if (!next.find((m) => m.turn_index === row.turn_index)) {
-              next.push({
+            if (prev.find((m) => m.turn_index === row.turn_index)) return prev;
+            const next = [
+              ...prev,
+              {
                 turn_index: row.turn_index,
                 move_type: row.move_type,
                 coord: row.coord,
@@ -230,9 +336,9 @@ export default function RoomPage() {
                 card: row.card,
                 created_at: row.created_at,
                 player_id: row.player_id,
-              });
-              next.sort((a, b) => a.turn_index - b.turn_index);
-            }
+              },
+            ];
+            next.sort((a, b) => a.turn_index - b.turn_index);
             return next;
           });
         }
@@ -240,10 +346,9 @@ export default function RoomPage() {
       .subscribe();
 
     return () => {
-      mounted = false;
-      supabase.removeChannel(roomSub);
+      supabase.removeChannel(channel);
     };
-  }, [code, room?.id, game, playerId]);
+  }, [game?.id, playerId]); // Only re-runs when a NEW game starts, NOT on every move
 
   // Screen Wake Lock - keep screen on during game
   useEffect(() => {
@@ -340,17 +445,16 @@ export default function RoomPage() {
       (r === 9 && c === 9)
     );
   }
-  function countSequencesWithOverlapConstraintClient(
-    occBefore,
-    occAfter,
-    team
-  ) {
+  function countMaxSequencesClient(occ, team) {
+    function nonCorner(line) {
+      return line.filter((i) => !cornerIndex(i));
+    }
     const existingLines = [];
     for (const line of ALL_LINES) {
       let ok = true;
       for (const idx of line) {
-        if (isCorner(idx)) continue;
-        const o = occBefore.get(idx);
+        if (cornerIndex(idx)) continue;
+        const o = occ.get(idx);
         if (!o || o.team !== team) {
           ok = false;
           break;
@@ -358,41 +462,37 @@ export default function RoomPage() {
       }
       if (ok) existingLines.push(line);
     }
-    const used = new Set();
-    const nonCorner = (line) => line.filter((i) => !isCorner(i));
-    for (const line of existingLines) {
-      for (const idx of nonCorner(line)) used.add(idx);
-    }
-    const candidate = [];
-    for (const line of ALL_LINES) {
-      // complete in after state?
-      let ok = true;
-      for (const idx of line) {
-        if (isCorner(idx)) continue;
-        const o = occAfter.get(idx);
-        if (!o || o.team !== team) {
-          ok = false;
-          break;
-        }
+    const candidates = existingLines;
+    if (candidates.length === 0) return 0;
+
+    let maxFound = 0;
+
+    function search(idx, usedChips, count) {
+      if (idx === candidates.length) {
+        maxFound = Math.max(maxFound, count);
+        return;
       }
-      if (ok) candidate.push(line);
-    }
-    // remove those already existing
-    const existingKey = new Set(existingLines.map((l) => l.join("-")));
-    const newOnly = candidate.filter((l) => !existingKey.has(l.join("-")));
-    let accepted = 0;
-    for (const line of newOnly) {
+      if (count + (candidates.length - idx) <= maxFound) return;
+
+      const line = candidates[idx];
+      const nc = nonCorner(line);
+
       let overlap = 0;
-      for (const idx of nonCorner(line)) {
-        if (used.has(idx)) overlap++;
-        if (overlap > 1) break;
+      for (const i of nc) {
+        if (usedChips.has(i)) overlap++;
       }
+
       if (overlap <= 1) {
-        accepted++;
-        for (const idx of nonCorner(line)) used.add(idx);
+        const nextChips = new Set(usedChips);
+        for (const i of nc) nextChips.add(i);
+        search(idx + 1, nextChips, count + 1);
       }
+
+      search(idx + 1, usedChips, count);
     }
-    return existingLines.length + accepted;
+
+    search(0, new Set(), 0);
+    return maxFound;
   }
 
   function cornerIndex(idx) {
@@ -564,6 +664,7 @@ export default function RoomPage() {
           clientTurnIndex: game.turn_index,
           moveType: "dead",
           card: selectedCard,
+          coord: coordOfIndex(targetSquare),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -1145,11 +1246,7 @@ export default function RoomPage() {
           occBefore.set(i, { team: "corner" });
           occAfter.set(i, { team: "corner" });
         });
-        const seqAfter = countSequencesWithOverlapConstraintClient(
-          occBefore,
-          occAfter,
-          lastPlace.team
-        );
+        const seqAfter = countMaxSequencesClient(occAfter, lastPlace.team);
         if (seqAfter >= winSeqCount) winner = lastPlace.team;
       }
 
@@ -1332,32 +1429,14 @@ export default function RoomPage() {
         }
       : null;
 
-    // Calculate actual sequence counts using same logic as server
+    // Calculate actual sequence counts using same logic as server (backtracking, overlap <= 1)
     const calculateSequenceCount = (team) => {
-      const used = new Set();
-      let count = 0;
-      const nonCorner = (line) => line.filter((i) => !cornerIndex(i));
-      for (const line of ALL_LINES) {
-        let ok = true;
-        for (const idx of line) {
-          if (cornerIndex(idx)) continue;
-          if (chips.get(idx) !== team) {
-            ok = false;
-            break;
-          }
-        }
-        if (!ok) continue;
-        let overlap = 0;
-        for (const idx of nonCorner(line)) {
-          if (used.has(idx)) overlap++;
-          if (overlap > 1) break;
-        }
-        if (overlap <= 1) {
-          count++;
-          for (const idx of nonCorner(line)) used.add(idx);
-        }
+      // Build occ map compatible with countMaxSequencesClient: idx -> { team }
+      const occ = new Map();
+      for (const [i, t] of chips.entries()) {
+        occ.set(i, { team: t });
       }
-      return count;
+      return countMaxSequencesClient(occ, team);
     };
 
     const sidebarScores = game

@@ -81,37 +81,43 @@ function nonCornerIndices(line) {
   return out;
 }
 
-// Enforce Sequence rule: a team may reuse at most ONE non-corner chip from already-made sequences
-// Returns total sequences after placing, computed as: existingSequences + newlyAcceptedSequences
-function countSequencesWithOverlapConstraint(beforeOcc, afterOcc, team) {
-  const existingLines = completeLinesForTeam(beforeOcc, team);
-  const existingKey = new Set(existingLines.map((l) => l.join("-")));
-  const candidateLines = completeLinesForTeam(afterOcc, team).filter(
-    (l) => !existingKey.has(l.join("-"))
-  );
+// Find maximum number of valid sequences (overlap <= 1 chip)
+function countMaxSequences(occ, team) {
+  const candidates = completeLinesForTeam(occ, team);
+  if (candidates.length === 0) return 0;
 
-  // Build used set from existing sequences
-  const used = new Set();
-  for (const line of existingLines) {
-    for (const idx of nonCornerIndices(line)) used.add(idx);
-  }
+  let maxFound = 0;
 
-  // Greedily accept new lines that share at most one non-corner chip with used
-  let accepted = 0;
-  for (const line of candidateLines) {
+  function search(idx, usedChips, count) {
+    if (idx === candidates.length) {
+      maxFound = Math.max(maxFound, count);
+      return;
+    }
+    // Optimization: if current + remaining < maxFound, stop
+    if (count + (candidates.length - idx) <= maxFound) return;
+
+    const line = candidates[idx];
     const nc = nonCornerIndices(line);
+
+    // Check overlap with currently selected chips
     let overlap = 0;
-    for (const idx of nc) {
-      if (used.has(idx)) overlap++;
-      if (overlap > 1) break;
+    for (const i of nc) {
+      if (usedChips.has(i)) overlap++;
     }
+
+    // Option 1: Include this line (if valid)
     if (overlap <= 1) {
-      accepted++;
-      for (const idx of nc) used.add(idx);
+      const nextChips = new Set(usedChips);
+      for (const i of nc) nextChips.add(i);
+      search(idx + 1, nextChips, count + 1);
     }
+
+    // Option 2: Skip this line
+    search(idx + 1, usedChips, count);
   }
 
-  return existingLines.length + accepted;
+  search(0, new Set(), 0);
+  return maxFound;
 }
 
 function isIndexInLockedSequence(occ, idx, team) {
@@ -305,11 +311,7 @@ export default async function handler(req, res) {
     // Sequence detection and potential finish
     const newOcc = new Map(occ);
     newOcc.set(coordToIndex(coord), { team: player.team });
-    const seqCount = countSequencesWithOverlapConstraint(
-      occ,
-      newOcc,
-      player.team
-    );
+    const seqCount = countMaxSequences(newOcc, player.team);
     let gameUpdate = {
       turn_index: game.turn_index + 1,
       current_team: nextTeam,
@@ -322,7 +324,11 @@ export default async function handler(req, res) {
       .single();
     const needed = (roomRow?.settings?.win_sequences ?? 2) | 0;
     if (seqCount >= needed) {
-      gameUpdate = { ...gameUpdate, finished_at: new Date().toISOString() };
+      gameUpdate = {
+        ...gameUpdate,
+        finished_at: new Date().toISOString(),
+        winner_team: player.team,
+      };
       await supabaseAdmin
         .from("rooms")
         .update({ status: "finished" })
@@ -331,7 +337,8 @@ export default async function handler(req, res) {
     const { error: gameUpdErr } = await supabaseAdmin
       .from("games")
       .update(gameUpdate)
-      .eq("id", gameId);
+      .eq("id", gameId)
+      .eq("turn_index", game.turn_index);
     if (gameUpdErr) return res.status(500).json({ error: gameUpdErr.message });
     return res.status(200).json({ ok: true });
   }
@@ -376,7 +383,8 @@ export default async function handler(req, res) {
         current_team: nextTeam,
         deck_cursor: deckCursor,
       })
-      .eq("id", gameId);
+      .eq("id", gameId)
+      .eq("turn_index", game.turn_index);
     if (gameUpdErr) return res.status(500).json({ error: gameUpdErr.message });
     return res.status(200).json({ ok: true });
   }
@@ -413,7 +421,8 @@ export default async function handler(req, res) {
         current_team: nextTeam,
         deck_cursor: deckCursor,
       })
-      .eq("id", gameId);
+      .eq("id", gameId)
+      .eq("turn_index", game.turn_index);
     if (gameUpdErr) return res.status(500).json({ error: gameUpdErr.message });
     return res.status(200).json({ ok: true });
   }
