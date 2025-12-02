@@ -573,8 +573,10 @@ export default function RoomPage() {
   function allowedIndicesForSelectedCard() {
     if (!selectedCard) return new Set();
     const chips = computeChips();
+    const { seqA, seqB, seqC } = computeSequenceSets(chips);
+    const isLocked = (idx) => seqA.has(idx) || seqB.has(idx) || seqC.has(idx);
+
     const mine = me?.team;
-    const opp = mine === "A" ? "B" : "A";
     const set = new Set();
     if (isTwoEyed(selectedCard)) {
       for (let i = 0; i < 100; i++) {
@@ -584,7 +586,7 @@ export default function RoomPage() {
     }
     if (isOneEyed(selectedCard)) {
       for (let [i, team] of chips.entries()) {
-        if (team === opp && !cornerIndex(i)) set.add(i);
+        if (team !== mine && !cornerIndex(i) && !isLocked(i)) set.add(i);
       }
       return set;
     }
