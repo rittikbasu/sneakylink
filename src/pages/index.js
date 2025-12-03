@@ -45,7 +45,7 @@ export default function Home() {
       try {
         localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
       } catch {}
-      router.push(`/room/${data.code}?pid=${data.player_id}`);
+      router.push(`/room/${data.code}`);
     } catch (e) {
       console.error(e);
       alert(e.message || "Failed to create room");
@@ -63,7 +63,7 @@ export default function Home() {
       try {
         const existingPid = localStorage.getItem(`seq_pid:${roomCode}`);
         if (existingPid) {
-          router.push(`/room/${roomCode}?pid=${existingPid}`);
+          router.push(`/room/${roomCode}`);
           return;
         }
       } catch {}
@@ -81,7 +81,7 @@ export default function Home() {
       try {
         localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
       } catch {}
-      router.push(`/room/${data.code}?pid=${data.player_id}`);
+      router.push(`/room/${data.code}`);
     } catch (e) {
       console.error(e);
       alert(e.message || "Failed to join room");
@@ -136,9 +136,18 @@ export default function Home() {
 
             <button
               onClick={onCreate}
-              className="w-full py-3.5 rounded-xl bg-zinc-950 border border-blue-700/20 text-white font-semibold"
+              disabled={submitting || !name.trim()}
+              aria-busy={submitting ? "true" : "false"}
+              className="w-full py-3.5 rounded-xl bg-zinc-950 border border-blue-700/20 text-white font-semibold disabled:bg-zinc-800 disabled:text-zinc-600"
             >
-              Create New Game
+              {submitting ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                  Creating...
+                </span>
+              ) : (
+                "Create New Game"
+              )}
             </button>
 
             <div className="relative">

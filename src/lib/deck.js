@@ -74,3 +74,9 @@ export function generateShuffledDeck(seed) {
   const rnd = mulberry32FromInt(seed32);
   return shuffle(base, rnd);
 }
+
+export function shuffleWithSeed(array, seed) {
+  const seed32 = xmur3(String(seed))();
+  const rnd = mulberry32FromInt(seed32);
+  return shuffle([...array], rnd);
+}

@@ -1,6 +1,6 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import layout from "@/data/boardLayout";
-import { generateShuffledDeck, parseCard } from "@/lib/deck";
+import { generateShuffledDeck, parseCard, shuffleWithSeed } from "@/lib/deck";
 import { ALL_LINES } from "@/lib/lines";
 
 function coordToIndex(coord) {
@@ -187,7 +187,9 @@ export default async function handler(req, res) {
   // Pull game state
   const { data: game, error: gameErr } = await supabaseAdmin
     .from("games")
-    .select("id, room_id, seed, turn_index, current_team, deck_cursor")
+    .select(
+      "id, room_id, turn_index, current_team, draw_pile, discard_pile, board_state, turn_order"
+    )
     .eq("id", gameId)
     .single();
   if (gameErr || !game)
@@ -219,16 +221,31 @@ export default async function handler(req, res) {
   const hand = [...(handRow.cards || [])];
   const hasCard = card ? hand.includes(card) : false;
 
-  // Moves so far
-  const { data: moves } = await supabaseAdmin
-    .from("moves")
-    .select("turn_index, move_type, coord, team, card")
-    .eq("game_id", gameId)
-    .order("turn_index");
-  const occ = computeOccupancy(moves || []);
+  // Board State (from JSON to Map)
+  const boardState = game.board_state || {};
+  const occ = new Map();
+  for (const [k, v] of Object.entries(boardState)) {
+    occ.set(parseInt(k, 10), v);
+  }
 
-  const deck = generateShuffledDeck(game.seed);
-  let deckCursor = game.deck_cursor;
+  let drawPile = game.draw_pile;
+  let discardPile = game.discard_pile || [];
+
+  function drawOne() {
+    if (drawPile.length === 0) {
+      if (discardPile.length === 0) return null;
+      // Reshuffle discards
+      // We don't need seed anymore for shuffle if we use a simple robust shuffle.
+      // But we imported shuffleWithSeed. Let's use it with a random seed or timestamp.
+      // Or just Math.random().
+      // Since we want determinism mostly for debugging but random is fine here.
+      // Let's use a timestamp-based seed.
+      const seedReshuffle = `reshuffle_${Date.now()}`;
+      drawPile = shuffleWithSeed(discardPile, seedReshuffle);
+      discardPile = [];
+    }
+    return drawPile.shift();
+  }
 
   // Build player turn order:
   // Prefer persisted game.turn_order; fallback to grouped round-robin.
@@ -290,8 +307,11 @@ export default async function handler(req, res) {
     }
     // Apply: remove card from hand, draw new
     hand.splice(hand.indexOf(card), 1);
-    const draw = deck[deckCursor++];
-    if (draw) hand.push(draw);
+    discardPile.push(card);
+    const draw = drawOne();
+    if (draw) {
+      hand.push(draw);
+    }
     // Persist transactionally-ish (best effort in sequence): insert move, update hand, update game turn
     const { error: insErr } = await supabaseAdmin.from("moves").insert({
       game_id: gameId,
@@ -310,12 +330,25 @@ export default async function handler(req, res) {
     if (handUpdErr) return res.status(500).json({ error: handUpdErr.message });
     // Sequence detection and potential finish
     const newOcc = new Map(occ);
-    newOcc.set(coordToIndex(coord), { team: player.team });
+    // idx is already calculated above
+    newOcc.set(idx, { team: player.team });
+
+    boardState[String(idx)] = { team: player.team };
+
     const seqCount = countMaxSequences(newOcc, player.team);
     let gameUpdate = {
       turn_index: game.turn_index + 1,
       current_team: nextTeam,
-      deck_cursor: deckCursor,
+      draw_pile: drawPile,
+      discard_pile: discardPile,
+      board_state: boardState,
+      last_move: {
+        player_id: playerId,
+        type: "place",
+        card,
+        coord,
+        team: player.team,
+      },
     };
     const { data: roomRow } = await supabaseAdmin
       .from("rooms")
@@ -359,8 +392,11 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "Cannot remove locked chip" });
     // Remove: consume card and draw new
     hand.splice(hand.indexOf(card), 1);
-    const draw = deck[deckCursor++];
-    if (draw) hand.push(draw);
+    discardPile.push(card);
+    const draw = drawOne();
+    if (draw) {
+      hand.push(draw);
+    }
     const { error: insErr } = await supabaseAdmin.from("moves").insert({
       game_id: gameId,
       player_id: playerId,
@@ -376,12 +412,24 @@ export default async function handler(req, res) {
       .update({ cards: hand })
       .eq("id", handRow.id);
     if (handUpdErr) return res.status(500).json({ error: handUpdErr.message });
+
+    delete boardState[String(idx)];
+
     const { error: gameUpdErr } = await supabaseAdmin
       .from("games")
       .update({
         turn_index: game.turn_index + 1,
         current_team: nextTeam,
-        deck_cursor: deckCursor,
+        draw_pile: drawPile,
+        discard_pile: discardPile,
+        board_state: boardState,
+        last_move: {
+          player_id: playerId,
+          type: "remove",
+          card,
+          coord,
+          team: player.team,
+        },
       })
       .eq("id", gameId)
       .eq("turn_index", game.turn_index);
@@ -398,8 +446,11 @@ export default async function handler(req, res) {
       positions.length > 0 && positions.every((i) => isCorner(i) || occ.has(i));
     if (!allCovered) return res.status(400).json({ error: "Card is not dead" });
     hand.splice(hand.indexOf(card), 1);
-    const draw = deck[deckCursor++];
-    if (draw) hand.push(draw);
+    discardPile.push(card);
+    const draw = drawOne();
+    if (draw) {
+      hand.push(draw);
+    }
     const { error: insErr } = await supabaseAdmin.from("moves").insert({
       game_id: gameId,
       player_id: playerId,
@@ -419,7 +470,14 @@ export default async function handler(req, res) {
       .update({
         turn_index: game.turn_index + 1,
         current_team: nextTeam,
-        deck_cursor: deckCursor,
+        draw_pile: drawPile,
+        discard_pile: discardPile,
+        last_move: {
+          player_id: playerId,
+          type: "dead",
+          card,
+          team: player.team,
+        },
       })
       .eq("id", gameId)
       .eq("turn_index", game.turn_index);
@@ -438,7 +496,11 @@ export default async function handler(req, res) {
     if (insErr) return res.status(500).json({ error: insErr.message });
     const { error: gameUpdErr } = await supabaseAdmin
       .from("games")
-      .update({ turn_index: game.turn_index + 1, current_team: nextTeam })
+      .update({
+        turn_index: game.turn_index + 1,
+        current_team: nextTeam,
+        last_move: { player_id: playerId, type: "timeout", team: player.team },
+      })
       .eq("id", gameId);
     if (gameUpdErr) return res.status(500).json({ error: gameUpdErr.message });
     return res.status(200).json({ ok: true });

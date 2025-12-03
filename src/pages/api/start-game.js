@@ -77,12 +77,11 @@ export default async function handler(req, res) {
     .from("games")
     .insert({
       room_id: roomId,
-      seed,
       turn_index: 0,
       current_team: players.find((p) => p.id === turnOrder[0])?.team ?? "A",
-      deck_cursor: cursor,
-      discard_count: 0,
-      // If the column doesn't exist, Postgres will ignore; safe to include.
+      draw_pile: deck.slice(cursor),
+      discard_pile: [],
+      board_state: {},
       turn_order: turnOrder,
     })
     .select()

@@ -15,15 +15,13 @@ export default function RoomPage() {
   const router = useRouter();
   const rawCode = router.query?.code;
   const code = typeof rawCode === "string" ? rawCode.toUpperCase() : undefined;
-  const playerId =
-    typeof router.query?.pid === "string" ? router.query.pid : null;
+  const [playerId, setPlayerId] = useState(null);
 
   const [room, setRoom] = useState(null);
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [game, setGame] = useState(null);
-  const [moves, setMoves] = useState([]);
   const [hand, setHand] = useState([]);
   const [selectedCard, setSelectedCard] = useState(null);
   const [targetSquare, setTargetSquare] = useState(null);
@@ -39,20 +37,36 @@ export default function RoomPage() {
   const [nameError, setNameError] = useState(false);
   const deepLinkHandledRef = useRef(false);
 
-  // If no pid in URL, try to restore from localStorage; else prompt for name
+  // If no pid in state, try to restore from localStorage/URL; else prompt for name
   useEffect(() => {
     if (!code) return;
     if (playerId) return;
     if (deepLinkHandledRef.current) return;
     deepLinkHandledRef.current = true;
-    (async () => {
+
+    // 1. URL Param (Legacy/Direct)
+    const urlPid =
+      typeof router.query?.pid === "string" ? router.query.pid : null;
+    if (urlPid) {
+      setPlayerId(urlPid);
       try {
-        const savedPid = localStorage.getItem(`seq_pid:${code}`);
-        if (savedPid) {
-          router.replace(`/room/${code}?pid=${savedPid}`);
-          return;
-        }
+        localStorage.setItem(`seq_pid:${code}`, urlPid);
       } catch {}
+      router.replace(`/room/${code}`, undefined, { shallow: true });
+      return;
+    }
+
+    // 2. LocalStorage
+    try {
+      const savedPid = localStorage.getItem(`seq_pid:${code}`);
+      if (savedPid) {
+        setPlayerId(savedPid);
+        return;
+      }
+    } catch {}
+
+    // 3. Auto-Join with saved name
+    (async () => {
       try {
         const savedName = localStorage.getItem("seq_name");
         if (savedName && savedName.trim()) {
@@ -67,13 +81,14 @@ export default function RoomPage() {
             try {
               localStorage.setItem(`seq_pid:${d.code}`, d.player_id);
             } catch {}
-            router.replace(`/room/${d.code}?pid=${d.player_id}`);
+            setPlayerId(d.player_id);
             return;
           }
         }
       } catch {}
       // Fallback: prompt for name
       setAskNameOpen(true);
+      setNameSubmitting(false);
     })();
   }, [code, playerId, router]);
 
@@ -99,7 +114,7 @@ export default function RoomPage() {
         localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
       } catch {}
       setAskNameOpen(false);
-      router.replace(`/room/${data.code}?pid=${data.player_id}`);
+      setPlayerId(data.player_id);
     } catch (e) {
       alert("Failed to join");
     } finally {
@@ -150,12 +165,6 @@ export default function RoomPage() {
             .eq("player_id", playerId)
             .single();
           setHand(handRow?.cards || []);
-          const { data: ms } = await supabase
-            .from("moves")
-            .select("turn_index, move_type, coord, team, card, created_at")
-            .eq("game_id", g.id)
-            .order("turn_index", { ascending: true });
-          setMoves(ms || []);
         }
       }
       setLoading(false);
@@ -278,13 +287,6 @@ export default function RoomPage() {
         .eq("player_id", playerId)
         .single();
       setHand(handRow?.cards || []);
-
-      const { data: ms } = await supabase
-        .from("moves")
-        .select("turn_index, move_type, coord, team, card, created_at")
-        .eq("game_id", game.id)
-        .order("turn_index", { ascending: true });
-      setMoves(ms || []);
     };
 
     // We can skip this fetch if we just loaded it in the main useEffect?
@@ -311,36 +313,6 @@ export default function RoomPage() {
             // Direct update from payload - NO REFETCH
             setHand(payload.new.cards || []);
           }
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "moves",
-          filter: `game_id=eq.${game.id}`,
-        },
-        (payload) => {
-          // Direct update from payload - NO REFETCH
-          const row = payload.new;
-          setMoves((prev) => {
-            if (prev.find((m) => m.turn_index === row.turn_index)) return prev;
-            const next = [
-              ...prev,
-              {
-                turn_index: row.turn_index,
-                move_type: row.move_type,
-                coord: row.coord,
-                team: row.team,
-                card: row.card,
-                created_at: row.created_at,
-                player_id: row.player_id,
-              },
-            ];
-            next.sort((a, b) => a.turn_index - b.turn_index);
-            return next;
-          });
         }
       )
       .subscribe();
@@ -422,13 +394,9 @@ export default function RoomPage() {
 
   function computeChips() {
     const m = new Map();
-    for (const mv of moves) {
-      if (mv.move_type === "place") {
-        const [r, c] = mv.coord.split(",").map((n) => parseInt(n, 10));
-        m.set(r * 10 + c, mv.team);
-      } else if (mv.move_type === "remove") {
-        const [r, c] = mv.coord.split(",").map((n) => parseInt(n, 10));
-        m.delete(r * 10 + c);
+    if (game?.board_state) {
+      for (const [k, v] of Object.entries(game.board_state)) {
+        m.set(parseInt(k, 10), v.team);
       }
     }
     return m;
@@ -1221,36 +1189,7 @@ export default function RoomPage() {
 
       // Authoritative winner calculation aligned with server:
       // take last placing move, compare before/after with overlap rule.
-      const lastPlace = [...moves]
-        .filter((m) => m.move_type === "place")
-        .sort((a, b) => b.turn_index - a.turn_index)[0];
-      let winner = null;
-      if (lastPlace) {
-        const occBefore = new Map();
-        const occAfter = new Map();
-        for (const mv of moves) {
-          if (mv.turn_index >= lastPlace.turn_index) continue;
-          if (mv.move_type === "place") {
-            const [r, c] = mv.coord.split(",").map((n) => parseInt(n, 10));
-            occBefore.set(r * 10 + c, { team: mv.team });
-            occAfter.set(r * 10 + c, { team: mv.team });
-          } else if (mv.move_type === "remove") {
-            const [r, c] = mv.coord.split(",").map((n) => parseInt(n, 10));
-            occBefore.delete(r * 10 + c);
-            occAfter.delete(r * 10 + c);
-          }
-        }
-        // add last move to after
-        const [lr, lc] = lastPlace.coord.split(",").map((n) => parseInt(n, 10));
-        occAfter.set(lr * 10 + lc, { team: lastPlace.team });
-        // lock corners
-        [0, 9, 90, 99].forEach((i) => {
-          occBefore.set(i, { team: "corner" });
-          occAfter.set(i, { team: "corner" });
-        });
-        const seqAfter = countMaxSequencesClient(occAfter, lastPlace.team);
-        if (seqAfter >= winSeqCount) winner = lastPlace.team;
-      }
+      const winner = game?.winner_team;
 
       const aPlayers = players.filter((p) => p.team === "A");
       const bPlayers = players.filter((p) => p.team === "B");
