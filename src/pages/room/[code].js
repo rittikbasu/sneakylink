@@ -25,6 +25,8 @@ export default function RoomPage() {
   const [hand, setHand] = useState([]);
   const [selectedCard, setSelectedCard] = useState(null);
   const [targetSquare, setTargetSquare] = useState(null);
+  const [glowData, setGlowData] = useState(null);
+  const glowTimeoutRef = useRef(null);
   const [posting, setPosting] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -378,11 +380,27 @@ export default function RoomPage() {
     s.add(targetSquare);
     return s;
   }, [targetSquare]);
-  const playersBySeat = useMemo(
-    () =>
-      [...players].sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
-    [players]
-  );
+
+  useEffect(() => {
+    if (
+      !game?.last_move ||
+      game.last_move.type !== "place" ||
+      !game.last_move.coord
+    )
+      return;
+    const [r, c] = game.last_move.coord.split(",").map((n) => parseInt(n, 10));
+    setGlowData({ idx: r * 10 + c, team: game.last_move.team });
+
+    if (glowTimeoutRef.current) clearTimeout(glowTimeoutRef.current);
+    glowTimeoutRef.current = setTimeout(() => {
+      setGlowData(null);
+      glowTimeoutRef.current = null;
+    }, 4000);
+
+    return () => {
+      if (glowTimeoutRef.current) clearTimeout(glowTimeoutRef.current);
+    };
+  }, [game?.last_move]);
   const myTurn =
     game && me && game.current_team === me.team && room?.status === "active";
 
@@ -1423,6 +1441,7 @@ export default function RoomPage() {
             seqB={seqB}
             seqC={seqC}
             highlightColor={myTeamColor}
+            lastMoveData={glowData}
           />
         </div>
         <Footer

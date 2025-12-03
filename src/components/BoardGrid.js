@@ -12,6 +12,7 @@ function BoardGridInner({
   seqB = new Set(),
   seqC = new Set(),
   highlightColor = "emerald",
+  lastMoveData = null,
 }) {
   return (
     <div className="w-full max-w-screen-sm sm:max-w-3xl md:max-w-5xl mx-auto px-2 sm:px-4">
@@ -22,6 +23,13 @@ function BoardGridInner({
             const isAllowed = allowed ? allowed.has(idx) : true;
             const canClick = typeof onSquareClick === "function" && isAllowed;
             const isHighlight = highlight.has(idx);
+            const isLast = lastMoveData && idx === lastMoveData.idx;
+            const glowColor =
+              lastMoveData?.team === "A"
+                ? "shadow-[0_0_20px_8px_rgba(16,185,129,0.7)]"
+                : lastMoveData?.team === "B"
+                ? "shadow-[0_0_20px_8px_rgba(56,189,248,0.7)]"
+                : "shadow-[0_0_20px_8px_rgba(244,63,94,0.7)]";
             return (
               <button
                 key={idx}
@@ -71,6 +79,11 @@ function BoardGridInner({
                     }`}
                   />
                 ) : null}
+                {isLast ? (
+                  <div
+                    className={`absolute inset-0 rounded-md ${glowColor} animate-pulse pointer-events-none z-10`}
+                  />
+                ) : null}
               </button>
             );
           })}
@@ -90,7 +103,8 @@ const areEqual = (prev, next) => {
     prev.seqA === next.seqA &&
     prev.seqB === next.seqB &&
     prev.seqC === next.seqC &&
-    prev.highlightColor === next.highlightColor
+    prev.highlightColor === next.highlightColor &&
+    prev.lastMoveData === next.lastMoveData
   );
 };
 
