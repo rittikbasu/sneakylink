@@ -1,6 +1,7 @@
 import { useRouter } from "next/router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
+import { validateRoomCode } from "@/lib/id";
 
 export default function Home() {
   const router = useRouter();
@@ -9,6 +10,12 @@ export default function Home() {
   const [submitting, setSubmitting] = useState(false);
   const [nameError, setNameError] = useState(false);
   const nameInputRef = useRef(null);
+  const trimmedCode = code.trim().toUpperCase();
+  const codeIsValid = useMemo(() => {
+    if (trimmedCode.length !== 6) return false;
+    return validateRoomCode(trimmedCode);
+  }, [trimmedCode]);
+  const showCodeError = trimmedCode.length === 6 && !codeIsValid;
 
   useEffect(() => {
     const saved = localStorage.getItem("seq_name");
@@ -55,15 +62,19 @@ export default function Home() {
   };
 
   const onJoin = async () => {
-    if (!name.trim() || !code.trim()) return;
+    if (!name.trim() || trimmedCode.length !== 6) return;
+    const roomCode = trimmedCode;
+    if (!validateRoomCode(roomCode)) {
+      alert("Invalid room code. Check for typos.");
+      return;
+    }
     setSubmitting(true);
     try {
-      const roomCode = code.trim().toUpperCase();
       // If we've already joined this room on this device, reuse player_id
       try {
-        const existingPid = localStorage.getItem(`seq_pid:${roomCode}`);
+        const existingPid = localStorage.getItem(`seq_pid:${trimmedCode}`);
         if (existingPid) {
-          router.push(`/room/${roomCode}`);
+          router.push(`/room/${trimmedCode}`);
           return;
         }
       } catch {}
@@ -73,7 +84,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
-          code: roomCode,
+          code: trimmedCode,
         }),
       });
       const data = await res.json();
@@ -163,7 +174,11 @@ export default function Home() {
 
             <div className="flex gap-2">
               <input
-                className="flex-1 rounded-xl bg-zinc-800/80 text-white placeholder-zinc-600 border border-zinc-700/50 focus:outline-none focus:border-blue-500/50 focus:ring-1 focus:ring-blue-500/50 px-3 py-3 uppercase text-center font-mono tracking-[0.25em]"
+                className={`flex-1 rounded-xl bg-zinc-800/80 text-white placeholder-zinc-600 border ${
+                  showCodeError
+                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/50"
+                    : "border-zinc-700/50 focus:border-blue-500/50 focus:ring-blue-500/50"
+                } focus:outline-none focus:ring-1 px-3 py-3 uppercase text-center font-mono tracking-[0.25em]`}
                 value={code}
                 onChange={(e) => setCode(e.target.value.toUpperCase())}
                 placeholder="ROOM"
@@ -172,8 +187,8 @@ export default function Home() {
               />
               <button
                 onClick={onJoin}
-                disabled={submitting || !name.trim() || code.trim().length < 4}
-                className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-semibold shadow-lg shadow-blue-600/20 disabled:shadow-none"
+                disabled={submitting || !name.trim() || !codeIsValid}
+                className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-semibold shadow-lg shadow-blue-600/20 disabled:shadow-none transition-all"
               >
                 Join
               </button>

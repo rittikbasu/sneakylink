@@ -1,3 +1,4 @@
+import { validateRoomCode } from "@/lib/id";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export default async function handler(req, res) {
@@ -6,6 +7,8 @@ export default async function handler(req, res) {
   const { name, code, player_id: rejoinPlayerId } = req.body || {};
   if (!code) return res.status(400).json({ error: "Code is required" });
   const normalizedCode = String(code).toUpperCase();
+  if (!validateRoomCode(normalizedCode))
+    return res.status(400).json({ error: "Invalid room code" });
   const normalizeName = (s) =>
     String(s || "")
       .trim()
