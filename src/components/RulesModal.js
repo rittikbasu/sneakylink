@@ -1,5 +1,3 @@
-import { X } from "lucide-react";
-
 export default function RulesModal({ isOpen, onClose }) {
   return (
     <>
@@ -27,17 +25,10 @@ export default function RulesModal({ isOpen, onClose }) {
         }
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-4 sm:p-6 border-b border-white/10 shrink-0">
+        <div className="flex items-center p-4 sm:p-6 border-b border-white/10 shrink-0">
           <h2 className="text-xl sm:text-2xl font-bold bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
-            How to Play SneakyLink
+            How to Play?
           </h2>
-          <button
-            onClick={onClose}
-            className="p-2 rounded-lg hover:bg-white/10 transition-colors"
-            aria-label="Close"
-          >
-            <X className="w-5 h-5" />
-          </button>
         </div>
 
         {/* Content */}
@@ -146,7 +137,7 @@ export default function RulesModal({ isOpen, onClose }) {
         <div className="p-4 sm:p-6 border-t border-white/10 shrink-0">
           <button
             onClick={onClose}
-            className="w-full py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-colors"
+            className="w-full py-3.5 rounded-xl bg-linear-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-semibold transition-all shadow-lg shadow-blue-600/20 hover:shadow-xl hover:shadow-blue-600/30"
           >
             Got It!
           </button>
