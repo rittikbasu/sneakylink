@@ -194,7 +194,7 @@ export default function Sidebar({
               <ScrollText className="w-4 h-4 text-zinc-400" />
               Show Rules
             </button>
-            {isHost && (
+            {isHost && onEndGame && (
               <button
                 onClick={onEndGame}
                 className="flex-1 py-3 rounded-lg bg-red-600/80 hover:bg-red-600 text-zinc-200 font-semibold transition-colors"

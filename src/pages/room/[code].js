@@ -10,7 +10,15 @@ import RulesModal from "@/components/RulesModal";
 import layout from "@/data/boardLayout";
 import { parseCard } from "@/lib/deck";
 import { validateRoomCode } from "@/lib/id";
-import { Copy, Users, Check, Settings, Trophy, Frown } from "lucide-react";
+import {
+  Copy,
+  Users,
+  Check,
+  Settings,
+  Trophy,
+  Frown,
+  Play,
+} from "lucide-react";
 import { ALL_LINES } from "@/lib/lines";
 
 export default function RoomPage() {
@@ -29,6 +37,7 @@ export default function RoomPage() {
   const [targetSquare, setTargetSquare] = useState(null);
   const [glowData, setGlowData] = useState(null);
   const glowTimeoutRef = useRef(null);
+  const lastMoveRef = useRef(null);
   const [posting, setPosting] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
@@ -36,6 +45,7 @@ export default function RoomPage() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [askNameOpen, setAskNameOpen] = useState(false);
+  const [showGameOver, setShowGameOver] = useState(false);
   const [tempName, setTempName] = useState("");
   const [nameSubmitting, setNameSubmitting] = useState(false);
   const [nameError, setNameError] = useState(false);
@@ -191,7 +201,13 @@ export default function RoomPage() {
           filter: `code=eq.${code}`,
         },
         (payload) => {
-          if (payload.new) setRoom(payload.new);
+          if (payload.new) {
+            setRoom(payload.new);
+            if (payload.new.status === "lobby") {
+              setGame(null);
+              setShowGameOver(false);
+            }
+          }
         }
       )
       .subscribe();
@@ -389,14 +405,37 @@ export default function RoomPage() {
   }, [targetSquare]);
 
   useEffect(() => {
-    if (
-      !game?.last_move ||
-      game.last_move.type !== "place" ||
-      !game.last_move.coord
-    )
+    const lm = game?.last_move;
+
+    // Reset tracking when there is no last move
+    if (!lm || lm.type !== "place" || !lm.coord) {
+      lastMoveRef.current = lm || null;
       return;
-    const [r, c] = game.last_move.coord.split(",").map((n) => parseInt(n, 10));
-    setGlowData({ idx: r * 10 + c, team: game.last_move.team });
+    }
+
+    // Skip the very first non-null last_move we see (typically initial load)
+    if (!lastMoveRef.current) {
+      lastMoveRef.current = lm;
+      return;
+    }
+
+    // If nothing about the last move actually changed, do nothing
+    if (
+      lastMoveRef.current.coord === lm.coord &&
+      lastMoveRef.current.type === lm.type &&
+      lastMoveRef.current.team === lm.team
+    ) {
+      return;
+    }
+
+    // Update tracked last move
+    lastMoveRef.current = lm;
+
+    // Never glow for moves that belong to a finished game (e.g. when reloading)
+    if (game?.finished_at) return;
+
+    const [r, c] = lm.coord.split(",").map((n) => parseInt(n, 10));
+    setGlowData({ idx: r * 10 + c, team: lm.team });
 
     if (glowTimeoutRef.current) clearTimeout(glowTimeoutRef.current);
     glowTimeoutRef.current = setTimeout(() => {
@@ -407,7 +446,16 @@ export default function RoomPage() {
     return () => {
       if (glowTimeoutRef.current) clearTimeout(glowTimeoutRef.current);
     };
-  }, [game?.last_move]);
+  }, [game?.last_move, game?.finished_at]);
+
+  useEffect(() => {
+    if (game?.finished_at) {
+      setShowGameOver(true);
+    } else {
+      setShowGameOver(false);
+    }
+  }, [game?.finished_at]);
+
   const myTurn =
     game && me && game.current_team === me.team && room?.status === "active";
 
@@ -637,7 +685,11 @@ export default function RoomPage() {
     setGame((prev) => ({
       ...prev,
       board_state: nextBoard,
-      last_move: { idx: targetSquare, team: me.team },
+      last_move: {
+        coord: coordOfIndex(targetSquare),
+        type: moveType,
+        team: me.team,
+      },
       turn_index: prev.turn_index + 1,
     }));
 
@@ -857,6 +909,28 @@ export default function RoomPage() {
     } catch (e) {
       alert("Failed to end game");
     }
+  }
+
+  async function handlePlayAgain() {
+    if (!room || !playerId || !isHost) return;
+    try {
+      await fetch("/api/play-again", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: room.id, playerId }),
+      });
+    } catch {}
+  }
+
+  async function handlePlayAgain() {
+    if (!room || !isHost) return;
+    try {
+      await fetch("/api/play-again", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: room.id, playerId }),
+      });
+    } catch {}
   }
 
   const content = () => {
@@ -1270,8 +1344,8 @@ export default function RoomPage() {
         </div>
       );
     }
-    // Check if game is finished
-    if (game?.finished_at) {
+    // Check if game is finished (Moved to overlay)
+    if (false && game?.finished_at) {
       const chips = computeChips();
       const { seqA, seqB, seqC } = computeSequenceSets(chips);
       const winSeqCount = room?.settings?.win_sequences ?? 2;
@@ -1512,6 +1586,17 @@ export default function RoomPage() {
           }
       : null;
 
+    const winner = game?.winner_team;
+    const isWinner = me?.team === winner;
+    const activeTeams = room?.settings?.teams ?? 2;
+    const isSolo =
+      (activeTeams === 2 && grouped.A.length === 1 && grouped.B.length === 1) ||
+      (activeTeams === 3 &&
+        grouped.A.length === 1 &&
+        grouped.B.length === 1 &&
+        grouped.C.length === 1);
+    const soloWinnerName = grouped[winner]?.[0]?.name;
+
     return (
       <>
         <Sidebar
@@ -1524,7 +1609,7 @@ export default function RoomPage() {
             setSidebarOpen(false);
             setRulesOpen(true);
           }}
-          onEndGame={handleEndGame}
+          onEndGame={!game?.finished_at ? handleEndGame : undefined}
         />
         <RulesModal isOpen={rulesOpen} onClose={() => setRulesOpen(false)} />
         <Header
@@ -1545,22 +1630,233 @@ export default function RoomPage() {
             lastMoveData={glowData}
           />
         </div>
-        <Footer
-          hand={hand}
-          selectedCard={selectedCard}
-          onCardSelect={(c) => {
-            setSelectedCard(c === selectedCard ? null : c);
-            setTargetSquare(null);
-          }}
-          onConfirmMove={onConfirmMove}
-          onDeadCard={onDead}
-          canConfirm={canConfirm}
-          canDead={canDead}
-          turnUsername={turnPlayer?.name || `Team ${game?.current_team}`}
-          teamColorClass={teamColor}
-          myTeamColor={myTeamColor}
-          myTurn={myTurn}
-        />
+
+        {/* End Game Modal */}
+        {game?.finished_at && showGameOver && (
+          <>
+            <div
+              className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm transition-opacity duration-300 opacity-100 pointer-events-auto"
+              onClick={() => setShowGameOver(false)}
+            />
+            <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-md z-50 flex flex-col rounded-2xl border border-white/10 bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_70%,black_100%)] backdrop-blur transition duration-300 transform opacity-100 scale-100 pointer-events-auto shadow-2xl">
+              {/* Header */}
+              <div className="flex items-center p-4 border-b border-white/10 shrink-0">
+                <h2 className="text-xl font-bold bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
+                  Game Results
+                </h2>
+              </div>
+
+              {/* Content */}
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                <div className="text-center">
+                  <div
+                    className={`inline-flex items-center justify-center w-20 h-20 rounded-full mb-4 ${
+                      isWinner
+                        ? "bg-amber-500/20 ring-4 ring-amber-500/30"
+                        : "bg-zinc-500/15 ring-4 ring-zinc-500/30"
+                    }`}
+                  >
+                    {isWinner ? (
+                      <Trophy className="w-10 h-10 text-yellow-500" />
+                    ) : (
+                      <Frown className="w-10 h-10 text-zinc-300" />
+                    )}
+                  </div>
+                  <h1 className="text-3xl font-bold mb-2 text-white">
+                    {isWinner
+                      ? "You Won!"
+                      : winner
+                      ? "Game Over!"
+                      : "Game Ended"}
+                  </h1>
+                  <p
+                    className={`text-lg font-semibold ${
+                      winner === "A"
+                        ? "text-emerald-400"
+                        : winner === "B"
+                        ? "text-sky-400"
+                        : winner === "C"
+                        ? "text-rose-400"
+                        : "text-gray-400"
+                    }`}
+                  >
+                    {winner
+                      ? isSolo
+                        ? `${soloWinnerName || `Team ${winner}`} Wins`
+                        : `Team ${winner} Wins`
+                      : "No winner"}
+                  </p>
+                </div>
+
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
+                    Final Scores
+                  </h3>
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between px-4 py-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                      <span className="text-emerald-400 font-semibold">
+                        {(isSolo ? grouped.A[0]?.name : "Team A") || "Team A"}
+                      </span>
+                      <span className="text-emerald-400 font-bold text-lg">
+                        {sidebarScores?.A}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between px-4 py-3 rounded-lg bg-sky-500/10 border border-sky-500/20">
+                      <span className="text-sky-400 font-semibold">
+                        {(isSolo ? grouped.B[0]?.name : "Team B") || "Team B"}
+                      </span>
+                      <span className="text-sky-400 font-bold text-lg">
+                        {sidebarScores?.B}
+                      </span>
+                    </div>
+                    {activeTeams === 3 && (
+                      <div className="flex items-center justify-between px-4 py-3 rounded-lg bg-rose-500/10 border border-rose-500/20">
+                        <span className="text-rose-400 font-semibold">
+                          {(isSolo ? grouped.C[0]?.name : "Team C") || "Team C"}
+                        </span>
+                        <span className="text-rose-400 font-bold text-lg">
+                          {sidebarScores?.C}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="p-6 border-t border-white/10 shrink-0">
+                <button
+                  onClick={() => setShowGameOver(false)}
+                  className="w-full py-3.5 rounded-xl bg-linear-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-semibold transition-all shadow-lg shadow-blue-600/20 hover:shadow-xl hover:shadow-blue-600/30"
+                >
+                  View Board
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {game?.finished_at ? (
+          <div className="fixed inset-x-0 bottom-0 z-30 pb-[calc(env(safe-area-inset-bottom)+8px)]">
+            <div className="w-full max-w-screen-sm sm:max-w-3xl md:max-w-5xl mx-auto px-4 h-[88px] flex items-center">
+              {isHost ? (
+                <div className="flex items-center justify-center gap-4 w-full">
+                  <button
+                    onClick={() => router.push("/")}
+                    className="flex-1 max-w-[160px] h-12 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95 flex items-center justify-center"
+                  >
+                    Home
+                  </button>
+
+                  <button
+                    onClick={handlePlayAgain}
+                    className="relative shrink-0 w-[88px] h-[88px] rounded-full bg-linear-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white transition-all hover:scale-105 active:scale-95 flex items-center justify-center group overflow-hidden border border-white/10"
+                  >
+                    <div className="absolute inset-0 bg-linear-to-t from-black/10 to-transparent pointer-events-none" />
+                    <svg
+                      viewBox="0 0 100 100"
+                      className="w-full h-full absolute inset-0"
+                    >
+                      <defs>
+                        <path
+                          id="topCurve"
+                          d="M 14,50 A 36,36 0 1,1 86,50"
+                          fill="none"
+                        />
+                        <path
+                          id="bottomCurve"
+                          d="M 14,50 A 36,36 0 0,0 86,50"
+                          fill="none"
+                        />
+                      </defs>
+                      <text
+                        fill="white"
+                        fontSize="14"
+                        fontWeight="800"
+                        letterSpacing="8"
+                        className="select-none"
+                      >
+                        <textPath
+                          href="#topCurve"
+                          startOffset="50%"
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                        >
+                          PLAY
+                        </textPath>
+                      </text>
+                      <text
+                        fill="white"
+                        fontSize="14"
+                        fontWeight="800"
+                        letterSpacing="8"
+                        className="select-none"
+                      >
+                        <textPath
+                          href="#bottomCurve"
+                          startOffset="50%"
+                          textAnchor="middle"
+                          dominantBaseline="middle"
+                        >
+                          AGAIN
+                        </textPath>
+                      </text>
+                    </svg>
+
+                    <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-inner">
+                      <Play className="w-4 h-4 fill-white" />
+                    </div>
+                  </button>
+
+                  {!showGameOver ? (
+                    <button
+                      onClick={() => setShowGameOver(true)}
+                      className="flex-1 max-w-[160px] h-12 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95 flex items-center justify-center"
+                    >
+                      Results
+                    </button>
+                  ) : (
+                    <div className="flex-1 max-w-[160px]" />
+                  )}
+                </div>
+              ) : (
+                <div className="flex gap-4 justify-center w-full">
+                  <button
+                    onClick={() => router.push("/")}
+                    className="flex-1 max-w-xs h-12 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95"
+                  >
+                    Home
+                  </button>
+                  {!showGameOver && (
+                    <button
+                      onClick={() => setShowGameOver(true)}
+                      className="flex-1 max-w-xs h-12 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95"
+                    >
+                      Results
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <Footer
+            hand={hand}
+            selectedCard={selectedCard}
+            onCardSelect={(c) => {
+              setSelectedCard(c === selectedCard ? null : c);
+              setTargetSquare(null);
+            }}
+            onConfirmMove={onConfirmMove}
+            onDeadCard={onDead}
+            canConfirm={canConfirm}
+            canDead={canDead}
+            turnUsername={turnPlayer?.name || `Team ${game?.current_team}`}
+            teamColorClass={teamColor}
+            myTeamColor={myTeamColor}
+            myTurn={myTurn}
+          />
+        )}
       </>
     );
   };
