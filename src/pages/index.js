@@ -7,7 +7,8 @@ export default function Home() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isJoining, setIsJoining] = useState(false);
   const [nameError, setNameError] = useState(false);
   const nameInputRef = useRef(null);
   const trimmedCode = code.trim().toUpperCase();
@@ -23,7 +24,6 @@ export default function Home() {
   }, []);
 
   const persistName = (n) => {
-    // Normalize: allow spaces, but not at start or end. Cap to 16 chars.
     const normalized = n.replace(/^\s+|\s+$/g, "").slice(0, 16);
     setName(normalized);
     if (normalized) setNameError(false);
@@ -40,7 +40,7 @@ export default function Home() {
       } catch {}
       return;
     }
-    setSubmitting(true);
+    setIsCreating(true);
     try {
       const res = await fetch("/api/create-room", {
         method: "POST",
@@ -52,12 +52,11 @@ export default function Home() {
       try {
         localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
       } catch {}
-      router.push(`/room/${data.code}`);
+      await router.push(`/room/${data.code}`);
     } catch (e) {
       console.error(e);
       alert(e.message || "Failed to create room");
-    } finally {
-      setSubmitting(false);
+      setIsCreating(false);
     }
   };
 
@@ -68,13 +67,12 @@ export default function Home() {
       alert("Invalid room code. Check for typos.");
       return;
     }
-    setSubmitting(true);
+    setIsJoining(true);
     try {
-      // If we've already joined this room on this device, reuse player_id
       try {
         const existingPid = localStorage.getItem(`seq_pid:${trimmedCode}`);
         if (existingPid) {
-          router.push(`/room/${trimmedCode}`);
+          await router.push(`/room/${trimmedCode}`);
           return;
         }
       } catch {}
@@ -92,14 +90,15 @@ export default function Home() {
       try {
         localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
       } catch {}
-      router.push(`/room/${data.code}`);
+      await router.push(`/room/${data.code}`);
     } catch (e) {
       console.error(e);
       alert(e.message || "Failed to join room");
-    } finally {
-      setSubmitting(false);
+      setIsJoining(false);
     }
   };
+
+  const isBusy = isCreating || isJoining;
 
   return (
     <main className="h-dvh overflow-hidden text-white">
@@ -113,7 +112,7 @@ export default function Home() {
                   alt="SneakyLink"
                   width={72}
                   height={72}
-                  className="brightness-150"
+                  className="brightness-150 animate-flip-once"
                 />
               </div>
             </div>
@@ -147,11 +146,11 @@ export default function Home() {
 
             <button
               onClick={onCreate}
-              disabled={submitting || !name.trim()}
-              aria-busy={submitting ? "true" : "false"}
+              disabled={isBusy || !name.trim()}
+              aria-busy={isCreating ? "true" : "false"}
               className="w-full py-3.5 rounded-xl bg-zinc-950 border border-blue-700/20 text-white font-semibold disabled:bg-zinc-800 disabled:text-zinc-600"
             >
-              {submitting ? (
+              {isCreating ? (
                 <span className="inline-flex items-center gap-2">
                   <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
                   Creating...
@@ -187,10 +186,16 @@ export default function Home() {
               />
               <button
                 onClick={onJoin}
-                disabled={submitting || !name.trim() || !codeIsValid}
+                disabled={isBusy || !name.trim() || !codeIsValid}
                 className="px-6 py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-semibold shadow-lg shadow-blue-600/20 disabled:shadow-none transition-all"
               >
-                Join
+                {isJoining ? (
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                  </span>
+                ) : (
+                  "Join"
+                )}
               </button>
             </div>
           </div>

@@ -1,5 +1,6 @@
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useState, useRef } from "react";
+import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
@@ -8,6 +9,7 @@ import Sidebar from "@/components/Sidebar";
 import RulesModal from "@/components/RulesModal";
 import layout from "@/data/boardLayout";
 import { parseCard } from "@/lib/deck";
+import { validateRoomCode } from "@/lib/id";
 import { Copy, Users, Check, Settings, Trophy, Frown } from "lucide-react";
 import { ALL_LINES } from "@/lib/lines";
 
@@ -42,6 +44,7 @@ export default function RoomPage() {
   // If no pid in state, try to restore from localStorage/URL; else prompt for name
   useEffect(() => {
     if (!code) return;
+    if (!validateRoomCode(code)) return;
     if (playerId) return;
     if (deepLinkHandledRef.current) return;
     deepLinkHandledRef.current = true;
@@ -127,6 +130,10 @@ export default function RoomPage() {
   // 1. Initial Load & Room Subscription (Stable)
   useEffect(() => {
     if (!code) return;
+    if (!validateRoomCode(code)) {
+      setLoading(false);
+      return;
+    }
     let mounted = true;
 
     (async () => {
@@ -612,6 +619,41 @@ export default function RoomPage() {
   async function onConfirmMove() {
     if (!myTurn || !selectedCard || targetSquare == null || posting) return;
     const moveType = isOneEyed(selectedCard) ? "remove" : "place";
+
+    const prevGame = { ...game };
+    const prevHand = [...hand];
+    const prevSelectedCard = selectedCard;
+    const prevTargetSquare = targetSquare;
+
+    // Optimistic update
+    const me = players.find((p) => p.id === playerId);
+    const nextBoard = { ...game.board_state };
+    if (moveType === "place") {
+      nextBoard[targetSquare] = { team: me.team };
+    } else {
+      delete nextBoard[targetSquare];
+    }
+
+    setGame((prev) => ({
+      ...prev,
+      board_state: nextBoard,
+      last_move: { idx: targetSquare, team: me.team },
+      turn_index: prev.turn_index + 1,
+    }));
+
+    // Remove card locally
+    const cardIdx = hand.findIndex(
+      (c) => c.rank === selectedCard.rank && c.suit === selectedCard.suit
+    );
+    if (cardIdx !== -1) {
+      const newHand = [...hand];
+      newHand.splice(cardIdx, 1);
+      setHand(newHand);
+    }
+
+    setSelectedCard(null);
+    setTargetSquare(null);
+
     try {
       setPosting(true);
       const res = await fetch("/api/move", {
@@ -623,16 +665,18 @@ export default function RoomPage() {
           playerId,
           clientTurnIndex: game.turn_index,
           moveType,
-          card: selectedCard,
-          coord: coordOfIndex(targetSquare),
+          card: prevSelectedCard,
+          coord: coordOfIndex(prevTargetSquare),
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Move failed");
-      setSelectedCard(null);
-      setTargetSquare(null);
     } catch (e) {
       alert(e.message || "Move failed");
+      setGame(prevGame);
+      setHand(prevHand);
+      setSelectedCard(prevSelectedCard);
+      setTargetSquare(prevTargetSquare);
     } finally {
       setPosting(false);
     }
@@ -686,17 +730,36 @@ export default function RoomPage() {
 
   async function switchTeam(nextTeam) {
     if (!room || !playerId || !["A", "B", "C"].includes(nextTeam)) return;
+
+    const prevPlayers = [...players];
+    setPlayers((prev) =>
+      prev.map((p) => (p.id === playerId ? { ...p, team: nextTeam } : p))
+    );
+
     try {
       await fetch("/api/switch-team", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ roomId: room.id, playerId, team: nextTeam }),
       });
-    } catch {}
+    } catch {
+      setPlayers(prevPlayers);
+    }
   }
 
   async function updateSettings(newSettings) {
     if (!room || !playerId || !isHost) return;
+
+    const prevRoom = { ...room };
+    setRoom((prev) =>
+      prev
+        ? {
+            ...prev,
+            settings: { ...(prev.settings || {}), ...newSettings },
+          }
+        : prev
+    );
+
     try {
       const res = await fetch("/api/update-settings", {
         method: "POST",
@@ -707,18 +770,10 @@ export default function RoomPage() {
           settings: newSettings,
         }),
       });
-      // Optimistic UI: reflect change immediately; realtime will confirm
-      if (res.ok) {
-        setRoom((prev) =>
-          prev
-            ? {
-                ...prev,
-                settings: { ...(prev.settings || {}), ...newSettings },
-              }
-            : prev
-        );
-      }
-    } catch {}
+      if (!res.ok) throw new Error();
+    } catch {
+      setRoom(prevRoom);
+    }
   }
 
   function copyCode() {
@@ -808,7 +863,15 @@ export default function RoomPage() {
     if (loading)
       return (
         <div className="min-h-dvh grid place-items-center">
-          <div className="text-zinc-500 text-2xl">Loading...</div>
+          <div className="flex flex-col items-center gap-4">
+            <Image
+              src="/cards.svg"
+              alt="Loading"
+              width={128}
+              height={128}
+              className="brightness-150 animate-flip rotate-20"
+            />
+          </div>
         </div>
       );
     if (!room)
@@ -885,11 +948,7 @@ export default function RoomPage() {
                 </div>
               </div>
 
-              <div
-                className={`grid gap-3 ${
-                  numTeams === 3 ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-2"
-                }`}
-              >
+              <div className="grid grid-cols-2 gap-3">
                 <div className="bg-linear-to-br from-emerald-950/50 to-emerald-900/20 rounded-2xl border border-emerald-900/40 overflow-hidden">
                   <div className="bg-emerald-950/30 px-3 py-2 border-b border-emerald-900/40">
                     <div className="flex items-center justify-between">
@@ -905,7 +964,11 @@ export default function RoomPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="py-3 px-1.5 space-y-1.5 min-h-[100px]">
+                  <div
+                    className={`py-3 px-1.5 space-y-1.5 ${
+                      numTeams === 3 ? "min-h-[123px]" : "min-h-[100px]"
+                    }`}
+                  >
                     {aPlayers.length > 0 ? (
                       aPlayers.map((p) => (
                         <div
@@ -952,7 +1015,11 @@ export default function RoomPage() {
                       </div>
                     </div>
                   </div>
-                  <div className="py-3 px-1.5 space-y-1.5 min-h-[100px]">
+                  <div
+                    className={`py-3 px-1.5 space-y-1.5 ${
+                      numTeams === 3 ? "min-h-[123px]" : "min-h-[100px]"
+                    }`}
+                  >
                     {bPlayers.length > 0 ? (
                       bPlayers.map((p) => (
                         <div
@@ -1000,7 +1067,11 @@ export default function RoomPage() {
                         </div>
                       </div>
                     </div>
-                    <div className="py-3 px-1.5 space-y-1.5 min-h-[100px]">
+                    <div
+                      className={`py-3 px-1.5 space-y-1.5 ${
+                        numTeams === 3 ? "min-h-[123px]" : "min-h-[100px]"
+                      }`}
+                    >
                       {cPlayers.length > 0 ? (
                         cPlayers.map((p) => (
                           <div
@@ -1032,9 +1103,51 @@ export default function RoomPage() {
                     </div>
                   </div>
                 )}
+
+                {numTeams === 3 && me && (
+                  <div className="bg-zinc-900/60 backdrop-blur rounded-2xl border border-white/5 overflow-hidden flex flex-col h-full">
+                    <div className="px-3 py-2 border-zinc-800/40">
+                      <span className="text-zinc-400 text-sm">Your Team</span>
+                    </div>
+                    <div className="pb-3 px-1.5 flex-1 flex flex-col">
+                      <div className="flex-1 flex flex-col justify-evenly gap-1.5 w-full px-1">
+                        <button
+                          onClick={() => switchTeam("A")}
+                          className={`w-full px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                            myTeam === "A"
+                              ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20"
+                              : "bg-zinc-800 text-gray-400 hover:bg-zinc-700"
+                          }`}
+                        >
+                          Team A
+                        </button>
+                        <button
+                          onClick={() => switchTeam("B")}
+                          className={`w-full px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                            myTeam === "B"
+                              ? "bg-sky-600 text-white shadow-lg shadow-sky-600/20"
+                              : "bg-zinc-800 text-gray-400 hover:bg-zinc-700"
+                          }`}
+                        >
+                          Team B
+                        </button>
+                        <button
+                          onClick={() => switchTeam("C")}
+                          className={`w-full px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
+                            myTeam === "C"
+                              ? "bg-rose-600/80 text-white shadow-lg shadow-rose-600/20"
+                              : "bg-zinc-800 text-gray-400 hover:bg-zinc-700"
+                          }`}
+                        >
+                          Team C
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {me ? (
+              {me && numTeams === 2 && (
                 <div className="bg-zinc-900/60 backdrop-blur rounded-2xl p-4 border border-white/5">
                   <div className="flex items-center justify-between gap-4 flex-wrap">
                     <div className="text-sm text-gray-400">Your team</div>
@@ -1059,22 +1172,10 @@ export default function RoomPage() {
                       >
                         Team B
                       </button>
-                      {numTeams === 3 && (
-                        <button
-                          onClick={() => switchTeam("C")}
-                          className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-                            myTeam === "C"
-                              ? "bg-rose-600/80 text-white"
-                              : "bg-zinc-800 text-gray-400 hover:bg-zinc-700"
-                          }`}
-                        >
-                          Team C
-                        </button>
-                      )}
                     </div>
                   </div>
                 </div>
-              ) : null}
+              )}
 
               {isHost ? (
                 <div className="bg-zinc-900/60 backdrop-blur rounded-2xl p-4 border border-white/5">

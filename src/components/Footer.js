@@ -101,6 +101,22 @@ export default function Footer({
                   </button>
                 );
               })}
+              {Array.from({ length: Math.max(0, 5 - hand.length) }).map(
+                (_, i) => (
+                  <div
+                    key={`skeleton-${i}`}
+                    style={
+                      cellPx
+                        ? { width: `${Math.max(40, Math.min(cellPx, 56))}px` }
+                        : undefined
+                    }
+                    className={
+                      (cellPx ? "" : "w-10 sm:w-12 md:w-14 ") +
+                      "shrink-0 snap-center relative aspect-5/7 rounded-md bg-zinc-800/50 ring-1 ring-white/10 animate-pulse"
+                    }
+                  />
+                )
+              )}
             </div>
           </div>
 
