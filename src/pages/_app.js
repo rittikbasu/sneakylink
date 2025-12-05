@@ -1,6 +1,7 @@
 import "@/styles/globals.css";
 import Head from "next/head";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,6 +32,7 @@ export default function App({ Component, pageProps }) {
       >
         <Component {...pageProps} />
       </div>
+      <Analytics />
     </>
   );
 }
