@@ -5,7 +5,7 @@ function c(rank, suit) {
 const rows = [
   // 1
   [
-    { type: "wild" },
+    { type: "free" },
     c("6", "diamond"),
     c("7", "diamond"),
     c("8", "diamond"),
@@ -14,7 +14,7 @@ const rows = [
     c("Q", "diamond"),
     c("K", "diamond"),
     c("A", "diamond"),
-    { type: "wild" },
+    { type: "free" },
   ],
   // 2
   [
@@ -122,7 +122,7 @@ const rows = [
   ],
   // 10
   [
-    { type: "wild" },
+    { type: "free" },
     c("9", "spade"),
     c("8", "spade"),
     c("7", "spade"),
@@ -131,7 +131,7 @@ const rows = [
     c("4", "spade"),
     c("3", "spade"),
     c("2", "spade"),
-    { type: "wild" },
+    { type: "free" },
   ],
 ];
 

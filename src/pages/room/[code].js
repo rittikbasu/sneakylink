@@ -410,6 +410,7 @@ export default function RoomPage() {
     // Reset tracking when there is no last move
     if (!lm || lm.type !== "place" || !lm.coord) {
       lastMoveRef.current = lm || null;
+      setGlowData(null);
       return;
     }
 
@@ -1344,6 +1345,28 @@ export default function RoomPage() {
         </div>
       );
     }
+
+    if (!playerId) {
+      return (
+        <div className="h-dvh flex flex-col items-center justify-center p-6 text-center">
+          <h1 className="text-3xl font-bold mb-4 text-white">
+            {game?.finished_at ? "Game Finished" : "Game in Progress"}
+          </h1>
+          <p className="text-zinc-400 mb-8 max-w-md leading-relaxed">
+            {game?.finished_at
+              ? "This game has already ended. Please ask the host for a new code."
+              : "This game has already started. You can join the next round once the host creates a new lobby."}
+          </p>
+          <button
+            onClick={() => router.push("/")}
+            className="px-8 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-semibold transition-all"
+          >
+            Back to Home
+          </button>
+        </div>
+      );
+    }
+
     // Check if game is finished (Moved to overlay)
     if (false && game?.finished_at) {
       const chips = computeChips();
@@ -1811,7 +1834,7 @@ export default function RoomPage() {
                   {!showGameOver ? (
                     <button
                       onClick={() => setShowGameOver(true)}
-                      className="flex-1 max-w-[160px] h-12 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95 flex items-center justify-center"
+                      className="flex-1 max-w-[160px] h-12 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95 flex items-center justify-center"
                     >
                       Results
                     </button>
@@ -1823,14 +1846,14 @@ export default function RoomPage() {
                 <div className="flex gap-4 justify-center w-full">
                   <button
                     onClick={() => router.push("/")}
-                    className="flex-1 max-w-xs h-12 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95"
+                    className="flex-1 max-w-xs h-12 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95"
                   >
                     Home
                   </button>
                   {!showGameOver && (
                     <button
                       onClick={() => setShowGameOver(true)}
-                      className="flex-1 max-w-xs h-12 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95"
+                      className="flex-1 max-w-xs h-12 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95"
                     >
                       Results
                     </button>
@@ -1865,7 +1888,7 @@ export default function RoomPage() {
     <main className="h-dvh overflow-hidden text-neutral-100">
       {content()}
       {/* Global Name prompt modal (covers all stages) */}
-      {askNameOpen && !playerId && (
+      {askNameOpen && !playerId && room?.status === "lobby" && (
         <>
           <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" />
           <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-sm z-50 rounded-2xl border border-white/10 bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_70%,black_100%)] backdrop-blur p-5 shadow-xl">

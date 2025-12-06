@@ -15,11 +15,11 @@ const suitColorByName = {
 };
 
 export default function PlayingCard({ type, rank, suit, interactive = true }) {
-  if (type === "wild") {
+  if (type === "free") {
     return (
       <div className="relative aspect-5/7 rounded-md bg-linear-to-br from-emerald-900/30 to-teal-900/30 ring-1 ring-emerald-600/30 shadow-sm grid place-items-center select-none">
         <div className="text-[10px] sm:text-xs font-semibold text-emerald-300 tracking-wide">
-          WILD
+          FREE
         </div>
       </div>
     );
