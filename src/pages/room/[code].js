@@ -812,8 +812,7 @@ export default function RoomPage() {
     if (navigator.share) {
       navigator
         .share({
-          title: "Join my SneakyLink game!",
-          text: `Join my SneakyLink room with code: ${room.code}`,
+          text: "Join my SneakyLink room!",
           url: url,
         })
         .catch(() => {
