@@ -981,7 +981,7 @@ export default function RoomPage() {
                     <div className="flex items-center justify-end">
                       <button
                         onClick={copyInvite}
-                        className="text-lg text-blue-500 font-semibold flex items-center gap-2"
+                        className="text-xl text-blue-500 font-semibold flex items-center gap-2"
                       >
                         {linkCopied ? (
                           <Check className="w-5 h-5 text-green-500" />
