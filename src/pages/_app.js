@@ -42,7 +42,10 @@ export default function App({ Component, pageProps }) {
           name="twitter:description"
           content="A multiplayer card game where you sneakily link cards to create sequences and outsmart your friends."
         />
-        <meta name="twitter:image" content="/og.png" />
+        <meta
+          name="twitter:image"
+          content="https://sneakylink.vercel.app/og.png"
+        />
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
