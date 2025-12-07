@@ -20,8 +20,29 @@ export default function App({ Component, pageProps }) {
         <title>SneakyLink</title>
         <meta
           name="description"
-          content="SneakyLink is a game about linking cards to create sequences."
+          content="A multiplayer card game where you sneakily link cards to create sequences and outsmart your friends."
         />
+        <meta property="og:title" content="SneakyLink" />
+        <meta
+          property="og:description"
+          content="A multiplayer card game where you sneakily link cards to create sequences and outsmart your friends."
+        />
+        <meta property="og:type" content="website" />
+        <meta property="og:image" content="/og.png" />
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content="SneakyLink" />
+        <meta name="og:url" content="https://sneakylink.vercel.app" />
+        <meta
+          property="og:image"
+          content="https://sneakylink.vercel.app/og.png"
+        />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta
+          name="twitter:description"
+          content="A multiplayer card game where you sneakily link cards to create sequences and outsmart your friends."
+        />
+        <meta name="twitter:image" content="/og.png" />
         <meta
           name="viewport"
           content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"
