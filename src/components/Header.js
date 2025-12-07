@@ -1,4 +1,5 @@
-import { Menu, ScrollText } from "lucide-react";
+import { Menu } from "lucide-react";
+import QuestionIcon from "./QuestionIcon";
 
 export default function Header({
   centerLabel = "SneakyLink",
@@ -23,14 +24,14 @@ export default function Header({
         <div className="justify-self-center text-2xl sm:text-base font-semibold bg-linear-to-b from-white/90 via-blue-200 to-blue-500 bg-clip-text text-transparent">
           {centerLabel}
         </div>
-        {/* Right: ScrollText button */}
+        {/* Right: Rules button */}
         <button
           type="button"
           onClick={onRulesClick}
           aria-label="Rules"
-          className="inline-flex items-center justify-center h-9 w-9 hover:bg-white/10 rounded-lg transition-colors"
+          className="inline-flex items-center justify-center h-9 w-9 hover:bg-white/10 rounded-full bg-white/5 ring-1 ring-blue-400/40 transition-colors"
         >
-          <ScrollText className="w-7 h-7 text-neutral-600" />
+          <QuestionIcon className="w-4 h-4 text-blue-400/90" />
         </button>
       </div>
     </div>

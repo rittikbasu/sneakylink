@@ -1,4 +1,88 @@
-import { X, Users, Trophy, ScrollText } from "lucide-react";
+import { X, Users, Target } from "lucide-react";
+import QuestionIcon from "./QuestionIcon";
+
+const TEAM_CONFIG = {
+  A: {
+    name: "Team A",
+    color: "emerald",
+    textColor: "text-emerald-400",
+    bgColor: "bg-emerald-500/5",
+    borderColor: "border-emerald-500/20",
+    badgeBg: "bg-emerald-500/20",
+    dotColor: "bg-emerald-500",
+  },
+  B: {
+    name: "Team B",
+    color: "sky",
+    textColor: "text-sky-400",
+    bgColor: "bg-sky-500/5",
+    borderColor: "border-sky-500/20",
+    badgeBg: "bg-sky-500/20",
+    dotColor: "bg-sky-500",
+  },
+  C: {
+    name: "Team C",
+    color: "rose",
+    textColor: "text-rose-400",
+    bgColor: "bg-rose-500/5",
+    borderColor: "border-rose-500/20",
+    badgeBg: "bg-rose-500/20",
+    dotColor: "bg-rose-500",
+  },
+};
+
+function TeamBlock({ teamKey, players, score, config }) {
+  if (!players || players.length === 0) return null;
+
+  return (
+    <div
+      className={`rounded-xl ${config.bgColor} border ${config.borderColor} overflow-hidden`}
+    >
+      {/* Team Header with Score */}
+      <div className="flex items-center justify-between px-3 py-2">
+        <div className="flex items-center gap-2">
+          <div className={`w-1.5 h-1.5 rounded-full ${config.dotColor}`} />
+          <span className={`font-semibold ${config.textColor} text-sm`}>
+            {config.name}
+          </span>
+        </div>
+        {score !== undefined && (
+          <div className={`${config.textColor} text-sm font-bold tabular-nums`}>
+            {score}
+          </div>
+        )}
+      </div>
+
+      {/* Players */}
+      <div className="px-2 pb-2 space-y-1">
+        {players.map((player) => (
+          <div
+            key={player.id}
+            className="flex items-center justify-between gap-2 px-2 py-1.5 rounded-lg bg-white/5"
+          >
+            <span className="text-sm text-gray-300 truncate min-w-0 flex-1">
+              {player.name}
+            </span>
+            <div className="flex items-center gap-1 shrink-0">
+              {player.isYou && (
+                <span
+                  className={`text-[9px] px-1.5 py-0.5 rounded-full ${config.badgeBg} ${config.textColor} font-medium uppercase`}
+                >
+                  You
+                </span>
+              )}
+              {player.isHost && (
+                <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-white/10 text-gray-400 font-medium uppercase">
+                  Host
+                </span>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function Sidebar({
   isOpen,
@@ -8,6 +92,7 @@ export default function Sidebar({
   isHost,
   onShowRules,
   onEndGame,
+  winSequences = 2,
 }) {
   return (
     <>
@@ -49,44 +134,23 @@ export default function Sidebar({
           </div>
 
           {/* Content */}
-          <div className="flex-1 p-4 space-y-6">
-            {/* Scores Section */}
-            {scores && (
-              <div>
-                <div className="flex items-center gap-2 mb-3">
-                  <Trophy className="w-4 h-4 text-amber-500" />
-                  <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-wide">
-                    Scores
-                  </h3>
+          <div className="flex-1 p-4 space-y-5">
+            {/* Sequences to win */}
+            <div className="rounded-xl bg-zinc-900/60 border border-white/5 p-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Target className="w-4 h-4 text-amber-500" />
+                  <span className="text-sm text-gray-400">
+                    Sequences to win
+                  </span>
                 </div>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-emerald-500/10">
-                    <span className="text-emerald-400 font-semibold">
-                      Team A
-                    </span>
-                    <span className="text-emerald-400 font-bold text-lg">
-                      {scores.A}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-sky-500/10">
-                    <span className="text-sky-400 font-semibold">Team B</span>
-                    <span className="text-sky-400 font-bold text-lg">
-                      {scores.B}
-                    </span>
-                  </div>
-                  {scores.C !== undefined && (
-                    <div className="flex items-center justify-between px-3 py-2 rounded-lg bg-rose-500/10">
-                      <span className="text-rose-400 font-semibold">
-                        Team C
-                      </span>
-                      <span className="text-rose-400 font-bold text-lg">
-                        {scores.C}
-                      </span>
-                    </div>
-                  )}
+                <div className="text-right">
+                  <span className="text-xl font-bold text-white tabular-nums">
+                    {winSequences}
+                  </span>
                 </div>
               </div>
-            )}
+            </div>
 
             {/* Teams Section */}
             {teams && (
@@ -97,88 +161,26 @@ export default function Sidebar({
                     Teams
                   </h3>
                 </div>
-                <div className="space-y-3">
-                  {/* Team A */}
-                  <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-3">
-                    <div className="text-emerald-400 font-semibold mb-2 text-sm">
-                      Team A
-                    </div>
-                    <div className="space-y-1">
-                      {teams.A.map((player) => (
-                        <div
-                          key={player.id}
-                          className="text-sm text-gray-300 px-2 py-1 rounded bg-white/5"
-                        >
-                          {player.name}
-                          {player.isYou && (
-                            <span className="ml-2 text-[10px] text-emerald-400">
-                              (YOU)
-                            </span>
-                          )}
-                          {player.isHost && (
-                            <span className="ml-2 text-[10px] text-gray-500">
-                              (HOST)
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Team B */}
-                  <div className="rounded-lg bg-sky-500/5 border border-sky-500/20 p-3">
-                    <div className="text-sky-400 font-semibold mb-2 text-sm">
-                      Team B
-                    </div>
-                    <div className="space-y-1">
-                      {teams.B.map((player) => (
-                        <div
-                          key={player.id}
-                          className="text-sm text-gray-300 px-2 py-1 rounded bg-white/5"
-                        >
-                          {player.name}
-                          {player.isYou && (
-                            <span className="ml-2 text-[10px] text-sky-400">
-                              (YOU)
-                            </span>
-                          )}
-                          {player.isHost && (
-                            <span className="ml-2 text-[10px] text-gray-500">
-                              (HOST)
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Team C */}
+                <div className="space-y-2.5">
+                  <TeamBlock
+                    teamKey="A"
+                    players={teams.A}
+                    score={scores?.A}
+                    config={TEAM_CONFIG.A}
+                  />
+                  <TeamBlock
+                    teamKey="B"
+                    players={teams.B}
+                    score={scores?.B}
+                    config={TEAM_CONFIG.B}
+                  />
                   {teams.C && teams.C.length > 0 && (
-                    <div className="rounded-lg bg-rose-500/5 border border-rose-500/20 p-3">
-                      <div className="text-rose-400 font-semibold mb-2 text-sm">
-                        Team C
-                      </div>
-                      <div className="space-y-1">
-                        {teams.C.map((player) => (
-                          <div
-                            key={player.id}
-                            className="text-sm text-gray-300 px-2 py-1 rounded bg-white/5"
-                          >
-                            {player.name}
-                            {player.isYou && (
-                              <span className="ml-2 text-[10px] text-rose-400">
-                                (YOU)
-                              </span>
-                            )}
-                            {player.isHost && (
-                              <span className="ml-2 text-[10px] text-gray-500">
-                                (HOST)
-                              </span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
+                    <TeamBlock
+                      teamKey="C"
+                      players={teams.C}
+                      score={scores?.C}
+                      config={TEAM_CONFIG.C}
+                    />
                   )}
                 </div>
               </div>
@@ -189,9 +191,9 @@ export default function Sidebar({
           <div className="p-4 border-t border-white/10 flex gap-2">
             <button
               onClick={onShowRules}
-              className="flex-1 py-3 rounded-lg bg-zinc-900 hover:bg-zinc-700 text-zinc-200 font-semibold transition-colors flex items-center justify-center gap-2"
+              className="flex-1 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-700 text-zinc-200 font-semibold transition-colors flex items-center justify-center gap-2"
             >
-              <ScrollText className="w-4 h-4 text-zinc-400" />
+              <QuestionIcon className="w-4 h-4 text-zinc-400" />
               Show Rules
             </button>
             {isHost && onEndGame && (

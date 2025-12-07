@@ -16,7 +16,7 @@ function BoardGridInner({
 }) {
   return (
     <div className="w-full max-w-screen-sm sm:max-w-3xl md:max-w-5xl mx-auto px-2 sm:px-4">
-      <div className="rounded-xl p-2 sm:p-3 ring-1 ring-white/10 shadow-[0_0_24px_4px_rgba(59,130,246,0.10)]">
+      <div className="rounded-xl p-2 sm:p-3 ring-1 ring-white/10 shadow-[0_0_24px_4px_rgba(59,130,246,0.20)]">
         <div id="board-grid" className="grid grid-cols-10 gap-1.5 sm:gap-2">
           {layout.map((cell, idx) => {
             const chip = chips.get(idx);

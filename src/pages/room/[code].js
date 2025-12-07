@@ -20,6 +20,7 @@ import {
   Play,
 } from "lucide-react";
 import { ALL_LINES } from "@/lib/lines";
+import { countMaxSequences } from "@/lib/sequences";
 
 export default function RoomPage() {
   const router = useRouter();
@@ -476,67 +477,6 @@ export default function RoomPage() {
     return m;
   }
 
-  // Client-side copy of server winner evaluation to avoid mismatch
-  function isCorner(idx) {
-    const r = Math.floor(idx / 10);
-    const c = idx % 10;
-    return (
-      (r === 0 && c === 0) ||
-      (r === 0 && c === 9) ||
-      (r === 9 && c === 0) ||
-      (r === 9 && c === 9)
-    );
-  }
-  function countMaxSequencesClient(occ, team) {
-    function nonCorner(line) {
-      return line.filter((i) => !cornerIndex(i));
-    }
-    const existingLines = [];
-    for (const line of ALL_LINES) {
-      let ok = true;
-      for (const idx of line) {
-        if (cornerIndex(idx)) continue;
-        const o = occ.get(idx);
-        if (!o || o.team !== team) {
-          ok = false;
-          break;
-        }
-      }
-      if (ok) existingLines.push(line);
-    }
-    const candidates = existingLines;
-    if (candidates.length === 0) return 0;
-
-    let maxFound = 0;
-
-    function search(idx, usedChips, count) {
-      if (idx === candidates.length) {
-        maxFound = Math.max(maxFound, count);
-        return;
-      }
-      if (count + (candidates.length - idx) <= maxFound) return;
-
-      const line = candidates[idx];
-      const nc = nonCorner(line);
-
-      let overlap = 0;
-      for (const i of nc) {
-        if (usedChips.has(i)) overlap++;
-      }
-
-      if (overlap <= 1) {
-        const nextChips = new Set(usedChips);
-        for (const i of nc) nextChips.add(i);
-        search(idx + 1, nextChips, count + 1);
-      }
-
-      search(idx + 1, usedChips, count);
-    }
-
-    search(0, new Set(), 0);
-    return maxFound;
-  }
-
   function cornerIndex(idx) {
     const r = Math.floor(idx / 10);
     const c = idx % 10;
@@ -910,17 +850,6 @@ export default function RoomPage() {
     } catch (e) {
       alert("Failed to end game");
     }
-  }
-
-  async function handlePlayAgain() {
-    if (!room || !playerId || !isHost) return;
-    try {
-      await fetch("/api/play-again", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId: room.id, playerId }),
-      });
-    } catch {}
   }
 
   async function handlePlayAgain() {
@@ -1593,7 +1522,7 @@ export default function RoomPage() {
       for (const [i, t] of chips.entries()) {
         occ.set(i, { team: t });
       }
-      return countMaxSequencesClient(occ, team);
+      return countMaxSequences(occ, team);
     };
 
     const sidebarScores = game
@@ -1633,6 +1562,7 @@ export default function RoomPage() {
             setRulesOpen(true);
           }}
           onEndGame={!game?.finished_at ? handleEndGame : undefined}
+          winSequences={room?.settings?.win_sequences ?? 2}
         />
         <RulesModal isOpen={rulesOpen} onClose={() => setRulesOpen(false)} />
         <Header
@@ -1655,13 +1585,25 @@ export default function RoomPage() {
         </div>
 
         {/* End Game Modal */}
-        {game?.finished_at && showGameOver && (
+        {game?.finished_at && (
           <>
             <div
-              className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm transition-opacity duration-300 opacity-100 pointer-events-auto"
+              className={
+                "fixed inset-0 z-50 bg-black/70 backdrop-blur-sm transition-opacity duration-300 " +
+                (showGameOver
+                  ? "opacity-100 pointer-events-auto"
+                  : "opacity-0 pointer-events-none")
+              }
               onClick={() => setShowGameOver(false)}
             />
-            <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-md z-50 flex flex-col rounded-2xl border border-white/10 bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_70%,black_100%)] backdrop-blur transition duration-300 transform opacity-100 scale-100 pointer-events-auto shadow-2xl">
+            <div
+              className={
+                "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-md z-50 flex flex-col rounded-2xl border border-white/10 bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_70%,black_100%)] backdrop-blur transition duration-300 transform " +
+                (showGameOver
+                  ? "opacity-100 scale-100 pointer-events-auto"
+                  : "opacity-0 scale-95 pointer-events-none")
+              }
+            >
               {/* Header */}
               <div className="flex items-center p-4 border-b border-white/10 shrink-0">
                 <h2 className="text-xl font-bold bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
@@ -1716,7 +1658,7 @@ export default function RoomPage() {
                     Final Scores
                   </h3>
                   <div className="space-y-2">
-                    <div className="flex items-center justify-between px-4 py-3 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                    <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
                       <span className="text-emerald-400 font-semibold">
                         {(isSolo ? grouped.A[0]?.name : "Team A") || "Team A"}
                       </span>
@@ -1724,7 +1666,7 @@ export default function RoomPage() {
                         {sidebarScores?.A}
                       </span>
                     </div>
-                    <div className="flex items-center justify-between px-4 py-3 rounded-lg bg-sky-500/10 border border-sky-500/20">
+                    <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-sky-500/10 border border-sky-500/20">
                       <span className="text-sky-400 font-semibold">
                         {(isSolo ? grouped.B[0]?.name : "Team B") || "Team B"}
                       </span>
