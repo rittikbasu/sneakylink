@@ -36,7 +36,7 @@ body {
   min-height: 100dvh;
 }
 
-/* Hide noisy scrollbars on mobile card row */
+/* hide noisy scrollbars on mobile card row */
 .scrollbar-none::-webkit-scrollbar { display: none; }
 .scrollbar-none { -ms-overflow-style: none; scrollbar-width: none; }
 
@@ -52,4 +52,23 @@ body {
 .animate-flip-once {
   animation: flip 2s cubic-bezier(0.5, 0, 0.1, 1);
   animation-iteration-count: 1;
+}
+
+/* force vertical orientation on mobile */
+@media screen and (max-width: 768px) and (orientation: landscape) {
+  body::after {
+    content: "Please rotate your device to portrait mode to play";
+    position: fixed;
+    inset: 0;
+    background: #000000;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    font-size: 1.125rem;
+    font-weight: 600;
+    text-align: center;
+    padding: 2rem;
+  }
 }

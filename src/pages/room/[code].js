@@ -18,6 +18,7 @@ import {
   Trophy,
   Frown,
   Play,
+  Share2,
 } from "lucide-react";
 import { ALL_LINES } from "@/lib/lines";
 import { countMaxSequences } from "@/lib/sequences";
@@ -52,7 +53,6 @@ export default function RoomPage() {
   const [nameError, setNameError] = useState(false);
   const deepLinkHandledRef = useRef(false);
 
-  // If no pid in state, try to restore from localStorage/URL; else prompt for name
   useEffect(() => {
     if (!code) return;
     if (!validateRoomCode(code)) return;
@@ -102,7 +102,6 @@ export default function RoomPage() {
           }
         }
       } catch {}
-      // Fallback: prompt for name
       setAskNameOpen(true);
       setNameSubmitting(false);
     })();
@@ -158,7 +157,6 @@ export default function RoomPage() {
       setRoom(roomRow || null);
 
       if (roomRow) {
-        // Load initial players
         const { data: ps } = await supabase
           .from("players")
           .select("*")
@@ -167,7 +165,6 @@ export default function RoomPage() {
         if (!mounted) return;
         setPlayers(ps || []);
 
-        // Load initial game
         const { data: gs } = await supabase
           .from("games")
           .select("*")
@@ -190,7 +187,6 @@ export default function RoomPage() {
       setLoading(false);
     })();
 
-    // Subscribe to ROOM updates only (rarely changes)
     const roomSub = supabase
       .channel(`room-${code}`)
       .on(
@@ -217,7 +213,7 @@ export default function RoomPage() {
       mounted = false;
       supabase.removeChannel(roomSub);
     };
-  }, [code, playerId]); // Added playerId to dependencies so it loads hand correctly on mount
+  }, [code, playerId]);
 
   // 2. Players & Games Subscription (Depends on Room ID)
   useEffect(() => {
@@ -268,10 +264,8 @@ export default function RoomPage() {
           filter: `room_id=eq.${room.id}`,
         },
         (payload) => {
-          // Direct update from payload - NO REFETCH
           if (payload.new) {
             setGame((prev) => {
-              // Only update if it's the current game or a newer one
               if (!prev || payload.new.created_at >= prev.created_at) {
                 return payload.new;
               }
@@ -285,27 +279,13 @@ export default function RoomPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [room?.id]); // Only re-runs if room ID changes (basically never)
+  }, [room?.id]);
 
   // 3. Game-Specific Subscription: Hands & Moves (Depends on Game ID)
   useEffect(() => {
     if (!game?.id || !playerId) return;
 
-    // NOTE: Initial load moved to main useEffect to avoid double fetching,
-    // but we need to reload if game ID changes (new game started).
-    // We check if we already have data for this game to avoid redundant fetch.
-
-    // If we are switching to a new game, we should fetch initial state
     const fetchGameState = async () => {
-      // Only fetch if we don't have hand/moves or if they belong to a different game (logic handled by dependency change)
-      // But to be safe/simple: always fetch when game.id changes.
-      // The main useEffect handles the *first* load. This handles *subsequent* games.
-      // Actually, main useEffect only runs on mount. So we DO need to fetch here if it's a new game.
-
-      // Optimization: check if current moves/hand match this game.id?
-      // React state update is async, so checking 'moves' might be stale.
-      // Relying on the fact that this effect runs when game.id changes is standard.
-
       const { data: handRow } = await supabase
         .from("hands")
         .select("cards")
@@ -315,12 +295,6 @@ export default function RoomPage() {
       setHand(handRow?.cards || []);
     };
 
-    // We can skip this fetch if we just loaded it in the main useEffect?
-    // It's tricky to coordinate. Let's rely on this effect for game state management
-    // and remove the game-specific fetch from the main useEffect to be cleaner?
-    // The user prompt kept it in main useEffect. Let's keep it there, but redundant fetch on mount is better than missing data.
-    // Actually, let's just run it. 1 fetch per game start is fine.
-    // The problem was 1 fetch per MOVE.
     fetchGameState();
 
     const channel = supabase
@@ -328,15 +302,13 @@ export default function RoomPage() {
       .on(
         "postgres_changes",
         {
-          event: "*", // Usually UPDATE
+          event: "*",
           schema: "public",
           table: "hands",
           filter: `game_id=eq.${game.id}`,
         },
         (payload) => {
-          // Check if this hand belongs to us
           if (payload.new && payload.new.player_id === playerId) {
-            // Direct update from payload - NO REFETCH
             setHand(payload.new.cards || []);
           }
         }
@@ -346,52 +318,82 @@ export default function RoomPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [game?.id, playerId]); // Only re-runs when a NEW game starts, NOT on every move
+  }, [game?.id, playerId]);
 
-  // Screen Wake Lock - keep screen on during game
+  // Screen Wake Lock - keep screen on during game (best effort)
   useEffect(() => {
-    // Only enable wake lock when in a room (lobby or active game)
-    if (!room) return;
+    if (!room?.id) return;
+    if (
+      typeof navigator === "undefined" ||
+      typeof document === "undefined" ||
+      !("wakeLock" in navigator)
+    ) {
+      return;
+    }
+
+    let releaseListener = null;
 
     const requestWakeLock = async () => {
       try {
-        if (typeof navigator !== "undefined" && "wakeLock" in navigator) {
-          const sentinel = await navigator.wakeLock.request("screen");
-          // Re-acquire if the wake lock is released by the UA (low power, etc.)
-          sentinel.addEventListener("release", () => {
+        const sentinel = await navigator.wakeLock.request("screen");
+        wakeLockRef.current = sentinel;
+
+        releaseListener =
+          releaseListener ||
+          (() => {
             if (document.visibilityState === "visible") {
-              // fire and forget
               requestWakeLock().catch(() => {});
             }
           });
-          wakeLockRef.current = sentinel;
-        }
-      } catch (e) {
-        // Wake lock request failed - silently fail
-        // This can happen if battery is low or permission denied
+        sentinel.addEventListener("release", releaseListener, { once: true });
+      } catch {
+        // Silently fail (battery saver, permissions, etc.)
       }
     };
 
-    const handleVisibilityChange = async () => {
+    const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        await requestWakeLock();
+        requestWakeLock().catch(() => {});
+      } else if (document.visibilityState === "hidden") {
+        try {
+          wakeLockRef.current?.release();
+        } catch {}
+        wakeLockRef.current = null;
       }
     };
 
-    // Request wake lock immediately
-    requestWakeLock();
+    const handleInteraction = () => {
+      if (!wakeLockRef.current && document.visibilityState === "visible") {
+        requestWakeLock().catch(() => {});
+      }
+    };
 
-    // Re-request when page becomes visible again
+    requestWakeLock().catch(() => {});
+    const touchListenerOptions = { passive: true };
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleVisibilityChange);
+    document.addEventListener("click", handleInteraction);
+    document.addEventListener(
+      "touchstart",
+      handleInteraction,
+      touchListenerOptions
+    );
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleVisibilityChange);
+      document.removeEventListener("click", handleInteraction);
+      document.removeEventListener(
+        "touchstart",
+        handleInteraction,
+        touchListenerOptions
+      );
       try {
         wakeLockRef.current?.release();
       } catch {}
       wakeLockRef.current = null;
     };
-  }, [room]);
+  }, [room?.id]);
 
   const isHost = room && playerId && room.host_player_id === playerId;
   const me = useMemo(
@@ -408,32 +410,19 @@ export default function RoomPage() {
   useEffect(() => {
     const lm = game?.last_move;
 
-    // Reset tracking when there is no last move
     if (!lm || lm.type !== "place" || !lm.coord) {
       lastMoveRef.current = lm || null;
       setGlowData(null);
       return;
     }
 
-    // Skip the very first non-null last_move we see (typically initial load)
     if (!lastMoveRef.current) {
       lastMoveRef.current = lm;
       return;
     }
 
-    // If nothing about the last move actually changed, do nothing
-    if (
-      lastMoveRef.current.coord === lm.coord &&
-      lastMoveRef.current.type === lm.type &&
-      lastMoveRef.current.team === lm.team
-    ) {
-      return;
-    }
-
-    // Update tracked last move
     lastMoveRef.current = lm;
 
-    // Never glow for moves that belong to a finished game (e.g. when reloading)
     if (game?.finished_at) return;
 
     const [r, c] = lm.coord.split(",").map((n) => parseInt(n, 10));
@@ -453,6 +442,8 @@ export default function RoomPage() {
   useEffect(() => {
     if (game?.finished_at) {
       setShowGameOver(true);
+      setSelectedCard(null);
+      setTargetSquare(null);
     } else {
       setShowGameOver(false);
     }
@@ -496,7 +487,6 @@ export default function RoomPage() {
       const used = new Set();
       const acc = [];
       for (const line of ALL_LINES) {
-        // is this line complete for team?
         let ok = true;
         for (const idx of line) {
           if (cornerIndex(idx)) continue;
@@ -506,7 +496,6 @@ export default function RoomPage() {
           }
         }
         if (!ok) continue;
-        // overlap check against previously accepted lines
         let overlap = 0;
         for (const idx of nonCorner(line)) {
           if (used.has(idx)) overlap++;
@@ -598,8 +587,43 @@ export default function RoomPage() {
     );
   }
 
+  const groupedPlayers = useMemo(
+    () => ({
+      A: [...players]
+        .filter((p) => p.team === "A")
+        .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
+      B: [...players]
+        .filter((p) => p.team === "B")
+        .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
+      C: [...players]
+        .filter((p) => p.team === "C")
+        .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
+    }),
+    [players]
+  );
+
+  const playersByTurnSafe = useMemo(() => {
+    const teamOrder = ["A", "B", "C"].filter(
+      (t) => groupedPlayers[t].length > 0
+    );
+    const maxLen = Math.max(...teamOrder.map((t) => groupedPlayers[t].length));
+    const pbt = [];
+    for (let i = 0; i < maxLen; i++) {
+      for (const t of teamOrder) {
+        if (groupedPlayers[t][i]) pbt.push(groupedPlayers[t][i]);
+      }
+    }
+    return pbt;
+  }, [groupedPlayers]);
+
   function onSquareClick(idx) {
-    if (!myTurn || !selectedCard || posting) return;
+    const turnPlayer =
+      playersByTurnSafe.length && game
+        ? playersByTurnSafe[game.turn_index % playersByTurnSafe.length]
+        : null;
+
+    if (!myTurn || !selectedCard || posting || turnPlayer?.id !== me?.id)
+      return;
     const allowed = allowedIndicesForSelectedCard();
     if (!allowed.has(idx)) return;
     setTargetSquare(idx);
@@ -614,7 +638,6 @@ export default function RoomPage() {
     const prevSelectedCard = selectedCard;
     const prevTargetSquare = targetSquare;
 
-    // Optimistic update
     const me = players.find((p) => p.id === playerId);
     const nextBoard = { ...game.board_state };
     if (moveType === "place") {
@@ -634,7 +657,6 @@ export default function RoomPage() {
       turn_index: prev.turn_index + 1,
     }));
 
-    // Remove card locally
     const cardIdx = hand.findIndex(
       (c) => c.rank === selectedCard.rank && c.suit === selectedCard.suit
     );
@@ -786,16 +808,34 @@ export default function RoomPage() {
   function copyInvite() {
     if (!room) return;
     const url = `${location.origin}/room/${room.code}`;
-    copyTextToClipboard(url)
-      .then((ok) => {
-        if (ok) {
-          setLinkCopied(true);
-          setTimeout(() => setLinkCopied(false), 2000);
-        } else {
-          alert("Copy failed");
-        }
-      })
-      .catch(() => alert("Copy failed"));
+
+    if (navigator.share) {
+      navigator
+        .share({
+          title: "Join my SneakyLink game!",
+          text: `Join my SneakyLink room with code: ${room.code}`,
+          url: url,
+        })
+        .catch(() => {
+          copyTextToClipboard(url).then((ok) => {
+            if (ok) {
+              setLinkCopied(true);
+              setTimeout(() => setLinkCopied(false), 2000);
+            }
+          });
+        });
+    } else {
+      copyTextToClipboard(url)
+        .then((ok) => {
+          if (ok) {
+            setLinkCopied(true);
+            setTimeout(() => setLinkCopied(false), 2000);
+          } else {
+            alert("Copy failed");
+          }
+        })
+        .catch(() => alert("Copy failed"));
+    }
   }
 
   async function copyTextToClipboard(text) {
@@ -895,6 +935,7 @@ export default function RoomPage() {
           : [aPlayers.length, bPlayers.length, cPlayers.length];
       const balanced = teamCounts.every((c) => c === teamCounts[0] && c > 0);
       const myTeam = me?.team;
+      const canShare = typeof navigator !== "undefined" && !!navigator.share;
 
       return (
         <div className="h-dvh overflow-y-auto text-white px-4 py-6">
@@ -942,10 +983,14 @@ export default function RoomPage() {
                         onClick={copyInvite}
                         className="text-lg text-blue-500 font-semibold flex items-center gap-2"
                       >
-                        {linkCopied && (
+                        {linkCopied ? (
                           <Check className="w-5 h-5 text-green-500" />
+                        ) : canShare ? (
+                          <Share2 className="w-5 h-5" />
+                        ) : (
+                          <Copy className="w-5 h-5" />
                         )}
-                        <span>Copy Link</span>
+                        <span>{canShare ? "Share Link" : "Copy Link"}</span>
                       </button>
                     </div>
                   </div>
@@ -1296,161 +1341,10 @@ export default function RoomPage() {
       );
     }
 
-    // Check if game is finished (Moved to overlay)
-    if (false && game?.finished_at) {
-      const chips = computeChips();
-      const { seqA, seqB, seqC } = computeSequenceSets(chips);
-      const winSeqCount = room?.settings?.win_sequences ?? 2;
-      // Compute final counts (display)
-      const nonCorner = (line) => line.filter((i) => !cornerIndex(i));
-      const acceptedCount = (team) => {
-        const used = new Set();
-        let count = 0;
-        for (const line of ALL_LINES) {
-          let ok = true;
-          for (const idx of line) {
-            if (cornerIndex(idx)) continue;
-            if (chips.get(idx) !== team) {
-              ok = false;
-              break;
-            }
-          }
-          if (!ok) continue;
-          let overlap = 0;
-          for (const idx of nonCorner(line)) {
-            if (used.has(idx)) overlap++;
-            if (overlap > 1) break;
-          }
-          if (overlap <= 1) {
-            count++;
-            for (const idx of nonCorner(line)) used.add(idx);
-          }
-        }
-        return count;
-      };
-      const aCount = acceptedCount("A");
-      const bCount = acceptedCount("B");
-      const cCount = acceptedCount("C");
-
-      // Authoritative winner calculation aligned with server:
-      // take last placing move, compare before/after with overlap rule.
-      const winner = game?.winner_team;
-
-      const aPlayers = players.filter((p) => p.team === "A");
-      const bPlayers = players.filter((p) => p.team === "B");
-      const cPlayers = players.filter((p) => p.team === "C");
-      const activeTeams = room?.settings?.teams ?? 2;
-      const isSolo =
-        (activeTeams === 2 && aPlayers.length === 1 && bPlayers.length === 1) ||
-        (activeTeams === 3 &&
-          aPlayers.length === 1 &&
-          bPlayers.length === 1 &&
-          cPlayers.length === 1);
-      const soloWinnerName = players.find((p) => p.team === winner)?.name;
-      const winnerColor =
-        winner === "A" ? "emerald" : winner === "B" ? "sky" : "rose";
-      const isWinner = me?.team === winner;
-
-      return (
-        <div className="h-dvh overflow-hidden text-white">
-          <div className="h-full flex flex-col items-center justify-center px-4">
-            <div className="w-full max-w-md text-center">
-              <div className="mb-8">
-                <div
-                  className={`inline-flex items-center justify-center w-20 h-20 rounded-full mb-4 ${
-                    isWinner
-                      ? "bg-amber-500/20 ring-4 ring-amber-500/30"
-                      : "bg-zinc-500/15 ring-4 ring-zinc-500/30"
-                  }`}
-                >
-                  {isWinner ? (
-                    <Trophy className="w-10 h-10 text-yellow-500" />
-                  ) : (
-                    <Frown className="w-10 h-10 text-zinc-300" />
-                  )}
-                </div>
-                <h1 className="text-4xl font-bold mb-2 bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
-                  {isWinner ? "You Won!" : winner ? "Game Over!" : "Game Ended"}
-                </h1>
-                <p
-                  className={`text-xl font-semibold mb-1 ${
-                    winner === "A"
-                      ? "text-emerald-400"
-                      : winner === "B"
-                      ? "text-sky-400"
-                      : winner === "C"
-                      ? "text-rose-400"
-                      : "text-gray-400"
-                  }`}
-                >
-                  {winner
-                    ? isSolo
-                      ? `${soloWinnerName || `Team ${winner}`} Wins`
-                      : `Team ${winner} Wins`
-                    : "No winner"}
-                </p>
-              </div>
-
-              <div className="bg-zinc-900/60 backdrop-blur rounded-2xl p-6 border border-white/5 mb-6">
-                <h3 className="text-xl text-gray-300 mb-4">Final Scores</h3>
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between px-4 py-2 rounded-lg bg-emerald-500/10">
-                    <span className="text-emerald-400 font-semibold">
-                      {(isSolo ? aPlayers[0]?.name : "Team A") || "Team A"}
-                    </span>
-                    <span className="text-emerald-400 font-bold">{aCount}</span>
-                  </div>
-                  <div className="flex items-center justify-between px-4 py-2 rounded-lg bg-sky-500/10">
-                    <span className="text-sky-400 font-semibold">
-                      {(isSolo ? bPlayers[0]?.name : "Team B") || "Team B"}
-                    </span>
-                    <span className="text-sky-400 font-bold">{bCount}</span>
-                  </div>
-                  {(room?.settings?.teams ?? 2) === 3 && (
-                    <div className="flex items-center justify-between px-4 py-2 rounded-lg bg-rose-500/10">
-                      <span className="text-rose-400 font-semibold">
-                        {(isSolo ? cPlayers[0]?.name : "Team C") || "Team C"}
-                      </span>
-                      <span className="text-rose-400 font-bold">{cCount}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <button
-                onClick={() => router.push("/")}
-                className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg shadow-blue-600/20"
-              >
-                Back to Home
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
     const chips = computeChips();
     const { seqA, seqB, seqC } = computeSequenceSets(chips);
-    // Build round-robin order by team to prevent consecutive teammates
-    const grouped = {
-      A: [...players]
-        .filter((p) => p.team === "A")
-        .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
-      B: [...players]
-        .filter((p) => p.team === "B")
-        .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
-      C: [...players]
-        .filter((p) => p.team === "C")
-        .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
-    };
-    const teamOrder = ["A", "B", "C"].filter((t) => grouped[t].length > 0);
-    const maxLen = Math.max(...teamOrder.map((t) => grouped[t].length));
-    const playersByTurn = [];
-    for (let i = 0; i < maxLen; i++) {
-      for (const t of teamOrder) {
-        if (grouped[t][i]) playersByTurn.push(grouped[t][i]);
-      }
-    }
+    const grouped = groupedPlayers;
+    const playersByTurn = playersByTurnSafe;
     const turnPlayer =
       playersByTurn.length && game
         ? playersByTurn[game.turn_index % playersByTurn.length]
@@ -1482,7 +1376,6 @@ export default function RoomPage() {
       !posting &&
       targetSquare == null;
 
-    // Compute teams and scores for sidebar
     const sidebarTeams = game
       ? {
           A: players
@@ -1515,9 +1408,7 @@ export default function RoomPage() {
         }
       : null;
 
-    // Calculate actual sequence counts using same logic as server (backtracking, overlap <= 1)
     const calculateSequenceCount = (team) => {
-      // Build occ map compatible with countMaxSequencesClient: idx -> { team }
       const occ = new Map();
       for (const [i, t] of chips.entries()) {
         occ.set(i, { team: t });
@@ -1584,7 +1475,6 @@ export default function RoomPage() {
           />
         </div>
 
-        {/* End Game Modal */}
         {game?.finished_at && (
           <>
             <div
@@ -1604,14 +1494,12 @@ export default function RoomPage() {
                   : "opacity-0 scale-95 pointer-events-none")
               }
             >
-              {/* Header */}
               <div className="flex items-center p-4 border-b border-white/10 shrink-0">
                 <h2 className="text-xl font-bold bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
                   Game Results
                 </h2>
               </div>
 
-              {/* Content */}
               <div className="flex-1 overflow-y-auto p-6 space-y-6">
                 <div className="text-center">
                   <div
@@ -1688,7 +1576,6 @@ export default function RoomPage() {
                 </div>
               </div>
 
-              {/* Footer */}
               <div className="p-6 border-t border-white/10 shrink-0">
                 <button
                   onClick={() => setShowGameOver(false)}
@@ -1829,7 +1716,6 @@ export default function RoomPage() {
   return (
     <main className="h-dvh overflow-hidden text-neutral-100">
       {content()}
-      {/* Global Name prompt modal (covers all stages) */}
       {askNameOpen && !playerId && room?.status === "lobby" && (
         <>
           <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" />
