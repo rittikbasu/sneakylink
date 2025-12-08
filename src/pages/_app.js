@@ -28,6 +28,7 @@ export default function App({ Component, pageProps }) {
           content="A multiplayer card game where you sneakily link cards to create sequences and outsmart your friends."
         />
         <meta property="og:type" content="website" />
+        <meta property="site_name" content="SneakyLink" />
         <meta property="og:image" content="/og.png" />
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content="SneakyLink" />
