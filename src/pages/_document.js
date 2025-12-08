@@ -5,7 +5,11 @@ export default function Document() {
     <Html lang="en">
       <Head>
         <link rel="icon" type="image/png" href="/favicon.png" />
-        <link rel="apple-touch-icon" href="/favicon.png" />
+        <link
+          rel="apple-touch-icon"
+          sizes="512x512"
+          href="/apple-touch-icon.png"
+        />
       </Head>
       <body className="antialiased">
         <Main />
