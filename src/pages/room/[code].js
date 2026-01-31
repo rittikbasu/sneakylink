@@ -1,5 +1,5 @@
 import { useRouter } from "next/router";
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 import Header from "@/components/Header";
@@ -40,10 +40,13 @@ export default function RoomPage() {
   const [glowData, setGlowData] = useState(null);
   const glowTimeoutRef = useRef(null);
   const lastMoveRef = useRef(null);
+  const lastGlowTurnRef = useRef(null);
   const [posting, setPosting] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const wakeLockRef = useRef(null);
+  const lastSyncRef = useRef(0);
+  const syncInFlightRef = useRef(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [askNameOpen, setAskNameOpen] = useState(false);
@@ -52,6 +55,72 @@ export default function RoomPage() {
   const [nameSubmitting, setNameSubmitting] = useState(false);
   const [nameError, setNameError] = useState(false);
   const deepLinkHandledRef = useRef(false);
+  const roomIdRef = useRef(null);
+  const playerIdRef = useRef(null);
+  const gameRef = useRef(null);
+
+  const refreshGameState = useCallback(async (reason = "resume") => {
+    const roomId = roomIdRef.current;
+    const pid = playerIdRef.current;
+    const currentGame = gameRef.current;
+    if (!roomId || !pid) return;
+      if (syncInFlightRef.current) return;
+      const now = Date.now();
+      if (now - lastSyncRef.current < 1000) return;
+      syncInFlightRef.current = true;
+      lastSyncRef.current = now;
+
+      try {
+        const { data: gs } = await supabase
+          .from("games")
+          .select(
+            "id, room_id, turn_index, current_team, board_state, last_move, finished_at, winner_team, created_at"
+          )
+          .eq("room_id", roomId)
+          .order("created_at", { ascending: false })
+          .limit(1);
+        const g = gs && gs.length ? gs[0] : null;
+        if (!g) return;
+
+        const needsHandRefresh =
+          !currentGame ||
+          currentGame.id !== g.id ||
+          currentGame.turn_index !== g.turn_index;
+
+        setGame((prev) => {
+          if (!prev || g.created_at >= prev.created_at) return g;
+          return prev;
+        });
+
+        if (needsHandRefresh) {
+          const { data: handRow } = await supabase
+            .from("hands")
+            .select("cards")
+            .eq("game_id", g.id)
+            .eq("player_id", pid)
+            .single();
+          setHand(handRow?.cards || []);
+        }
+      } catch {
+        // Best-effort; realtime will eventually reconcile.
+      } finally {
+        syncInFlightRef.current = false;
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    roomIdRef.current = room?.id || null;
+  }, [room?.id]);
+
+  useEffect(() => {
+    playerIdRef.current = playerId || null;
+  }, [playerId]);
+
+  useEffect(() => {
+    gameRef.current = game || null;
+  }, [game]);
 
   useEffect(() => {
     if (!code) return;
@@ -207,7 +276,11 @@ export default function RoomPage() {
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          refreshGameState("room-subscribe");
+        }
+      });
 
     return () => {
       mounted = false;
@@ -274,7 +347,11 @@ export default function RoomPage() {
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          refreshGameState("lobby-subscribe");
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);
@@ -313,7 +390,11 @@ export default function RoomPage() {
           }
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "SUBSCRIBED") {
+          refreshGameState("game-subscribe");
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);
@@ -395,6 +476,34 @@ export default function RoomPage() {
     };
   }, [room?.id]);
 
+  useEffect(() => {
+    if (!room?.id || !playerId) return;
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        refreshGameState("visibility");
+      }
+    };
+    const handleFocus = () => {
+      if (document.visibilityState === "visible") {
+        refreshGameState("focus");
+      }
+    };
+    const handleOnline = () => {
+      refreshGameState("online");
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [room?.id, playerId, refreshGameState]);
+
   const isHost = room && playerId && room.host_player_id === playerId;
   const me = useMemo(
     () => players.find((p) => p.id === playerId) || null,
@@ -409,21 +518,41 @@ export default function RoomPage() {
 
   useEffect(() => {
     const lm = game?.last_move;
+    const currentTurn = game?.turn_index ?? null;
 
     if (!lm || lm.type !== "place" || !lm.coord) {
       lastMoveRef.current = lm || null;
+      if (currentTurn != null) lastGlowTurnRef.current = currentTurn;
+      if (glowTimeoutRef.current) {
+        clearTimeout(glowTimeoutRef.current);
+        glowTimeoutRef.current = null;
+      }
       setGlowData(null);
       return;
     }
 
-    if (!lastMoveRef.current) {
+    if (lastGlowTurnRef.current == null) {
+      lastGlowTurnRef.current = currentTurn;
       lastMoveRef.current = lm;
       return;
     }
 
+    if (currentTurn === lastGlowTurnRef.current) {
+      lastMoveRef.current = lm;
+      return;
+    }
+
+    lastGlowTurnRef.current = currentTurn;
     lastMoveRef.current = lm;
 
-    if (game?.finished_at) return;
+    if (game?.finished_at) {
+      if (glowTimeoutRef.current) {
+        clearTimeout(glowTimeoutRef.current);
+        glowTimeoutRef.current = null;
+      }
+      setGlowData(null);
+      return;
+    }
 
     const [r, c] = lm.coord.split(",").map((n) => parseInt(n, 10));
     setGlowData({ idx: r * 10 + c, team: lm.team });
@@ -432,12 +561,16 @@ export default function RoomPage() {
     glowTimeoutRef.current = setTimeout(() => {
       setGlowData(null);
       glowTimeoutRef.current = null;
-    }, 4000);
+    }, 5000);
+  }, [game?.last_move, game?.finished_at, game?.turn_index]);
 
+  useEffect(() => {
     return () => {
-      if (glowTimeoutRef.current) clearTimeout(glowTimeoutRef.current);
+      if (glowTimeoutRef.current) {
+        clearTimeout(glowTimeoutRef.current);
+      }
     };
-  }, [game?.last_move, game?.finished_at]);
+  }, []);
 
   useEffect(() => {
     if (game?.finished_at) {
@@ -1470,6 +1603,106 @@ export default function RoomPage() {
       myTurn,
     };
 
+    const gameOverControls = (
+      <>
+        {isHost ? (
+          <div className="flex items-center justify-center gap-4 md:gap-6 lg:gap-10 w-full">
+            <button
+              onClick={() => router.push("/")}
+              className="flex-1 max-w-[160px] h-12 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95 flex items-center justify-center"
+            >
+              Home
+            </button>
+
+            <button
+              onClick={handlePlayAgain}
+              className="relative shrink-0 w-[88px] h-[88px] rounded-full bg-linear-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white transition-all hover:scale-105 active:scale-95 flex items-center justify-center group overflow-hidden border border-white/10"
+            >
+              <div className="absolute inset-0 bg-linear-to-t from-black/10 to-transparent pointer-events-none" />
+              <svg viewBox="0 0 100 100" className="w-full h-full absolute inset-0">
+                <defs>
+                  <path
+                    id="topCurve"
+                    d="M 14,50 A 36,36 0 1,1 86,50"
+                    fill="none"
+                  />
+                  <path
+                    id="bottomCurve"
+                    d="M 14,50 A 36,36 0 0,0 86,50"
+                    fill="none"
+                  />
+                </defs>
+                <text
+                  fill="white"
+                  fontSize="14"
+                  fontWeight="800"
+                  letterSpacing="8"
+                  className="select-none"
+                >
+                  <textPath
+                    href="#topCurve"
+                    startOffset="55%"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                  >
+                    PLAY
+                  </textPath>
+                </text>
+                <text
+                  fill="white"
+                  fontSize="14"
+                  fontWeight="800"
+                  letterSpacing="8"
+                  className="select-none"
+                >
+                  <textPath
+                    href="#bottomCurve"
+                    startOffset="52%"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                  >
+                    AGAIN
+                  </textPath>
+                </text>
+              </svg>
+
+              <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-inner">
+                <Play className="w-4 h-4 fill-white" />
+              </div>
+            </button>
+
+            {!showGameOver ? (
+              <button
+                onClick={() => setShowGameOver(true)}
+                className="flex-1 max-w-[160px] h-12 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95 flex items-center justify-center"
+              >
+                Results
+              </button>
+            ) : (
+              <div className="flex-1 max-w-[160px]" />
+            )}
+          </div>
+        ) : (
+          <div className="flex gap-4 justify-center w-full">
+            <button
+              onClick={() => router.push("/")}
+              className="flex-1 max-w-xs h-12 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95"
+            >
+              Home
+            </button>
+            {!showGameOver && (
+              <button
+                onClick={() => setShowGameOver(true)}
+                className="flex-1 max-w-xs h-12 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95"
+              >
+                Results
+              </button>
+            )}
+          </div>
+        )}
+      </>
+    );
+
     return (
       <>
         {/* Mobile sidebar - fixed positioned */}
@@ -1517,6 +1750,15 @@ export default function RoomPage() {
                 lastMoveData={glowData}
               />
               {!game?.finished_at && <Footer {...footerProps} variant="desktop" />}
+              {game?.finished_at && (
+                <div className="hidden md:block w-full max-w-screen-sm sm:max-w-3xl md:max-w-[min(calc(100dvw-360px),calc((100dvh-240px)/1.4))] mx-auto">
+                  <div className="rounded-xl p-2.5 border border-white/10">
+                    <div className="h-[88px] flex items-center">
+                      {gameOverControls}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1635,106 +1877,9 @@ export default function RoomPage() {
         )}
 
         {game?.finished_at ? (
-          <div className="fixed inset-x-0 bottom-0 z-30 pb-[calc(env(safe-area-inset-bottom)+8px)] lg:right-[340px]">
-            <div className="w-full max-w-screen-sm sm:max-w-3xl md:max-w-5xl lg:max-w-[calc((100dvh-200px)*0.72)] mx-auto px-4 h-[88px] flex items-center">
-              {isHost ? (
-                <div className="flex items-center justify-center gap-4 w-full">
-                  <button
-                    onClick={() => router.push("/")}
-                    className="flex-1 max-w-[160px] h-12 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95 flex items-center justify-center"
-                  >
-                    Home
-                  </button>
-
-                  <button
-                    onClick={handlePlayAgain}
-                    className="relative shrink-0 w-[88px] h-[88px] rounded-full bg-linear-to-b from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-white transition-all hover:scale-105 active:scale-95 flex items-center justify-center group overflow-hidden border border-white/10"
-                  >
-                    <div className="absolute inset-0 bg-linear-to-t from-black/10 to-transparent pointer-events-none" />
-                    <svg
-                      viewBox="0 0 100 100"
-                      className="w-full h-full absolute inset-0"
-                    >
-                      <defs>
-                        <path
-                          id="topCurve"
-                          d="M 14,50 A 36,36 0 1,1 86,50"
-                          fill="none"
-                        />
-                        <path
-                          id="bottomCurve"
-                          d="M 14,50 A 36,36 0 0,0 86,50"
-                          fill="none"
-                        />
-                      </defs>
-                      <text
-                        fill="white"
-                        fontSize="14"
-                        fontWeight="800"
-                        letterSpacing="8"
-                        className="select-none"
-                      >
-                        <textPath
-                          href="#topCurve"
-                          startOffset="50%"
-                          textAnchor="middle"
-                          dominantBaseline="middle"
-                        >
-                          PLAY
-                        </textPath>
-                      </text>
-                      <text
-                        fill="white"
-                        fontSize="14"
-                        fontWeight="800"
-                        letterSpacing="8"
-                        className="select-none"
-                      >
-                        <textPath
-                          href="#bottomCurve"
-                          startOffset="50%"
-                          textAnchor="middle"
-                          dominantBaseline="middle"
-                        >
-                          AGAIN
-                        </textPath>
-                      </text>
-                    </svg>
-
-                    <div className="w-8 h-8 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center shadow-inner">
-                      <Play className="w-4 h-4 fill-white" />
-                    </div>
-                  </button>
-
-                  {!showGameOver ? (
-                    <button
-                      onClick={() => setShowGameOver(true)}
-                      className="flex-1 max-w-[160px] h-12 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95 flex items-center justify-center"
-                    >
-                      Results
-                    </button>
-                  ) : (
-                    <div className="flex-1 max-w-[160px]" />
-                  )}
-                </div>
-              ) : (
-                <div className="flex gap-4 justify-center w-full">
-                  <button
-                    onClick={() => router.push("/")}
-                    className="flex-1 max-w-xs h-12 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95"
-                  >
-                    Home
-                  </button>
-                  {!showGameOver && (
-                    <button
-                      onClick={() => setShowGameOver(true)}
-                      className="flex-1 max-w-xs h-12 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-700/50 text-white font-semibold transition-all shadow-sm hover:shadow-md active:scale-95"
-                    >
-                      Results
-                    </button>
-                  )}
-                </div>
-              )}
+          <div className="fixed inset-x-0 bottom-0 z-30 pb-[calc(env(safe-area-inset-bottom)+8px)] md:hidden">
+            <div className="w-full max-w-screen-sm sm:max-w-3xl mx-auto px-4 h-[88px] flex items-center">
+              {gameOverControls}
             </div>
           </div>
         ) : (
