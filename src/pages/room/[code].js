@@ -790,12 +790,10 @@ export default function RoomPage() {
       turn_index: prev.turn_index + 1,
     }));
 
-    const cardIdx = hand.findIndex(
-      (c) => c.rank === selectedCard.rank && c.suit === selectedCard.suit
-    );
+    const cardIdx = hand.findIndex((c) => c === prevSelectedCard);
     if (cardIdx !== -1) {
       const newHand = [...hand];
-      newHand.splice(cardIdx, 1);
+      newHand[cardIdx] = "__pending__";
       setHand(newHand);
     }
 
@@ -832,7 +830,18 @@ export default function RoomPage() {
 
   async function onDead() {
     if (!myTurn || !selectedCard || posting) return;
+    const prevHand = [...hand];
+    const prevSelectedCard = selectedCard;
+    const prevTargetSquare = targetSquare;
     try {
+      const cardIdx = hand.findIndex((c) => c === prevSelectedCard);
+      if (cardIdx !== -1) {
+        const newHand = [...hand];
+        newHand[cardIdx] = "__pending__";
+        setHand(newHand);
+      }
+      setSelectedCard(null);
+      setTargetSquare(null);
       setPosting(true);
       const res = await fetch("/api/move", {
         method: "POST",
@@ -849,10 +858,11 @@ export default function RoomPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Dead failed");
-      setSelectedCard(null);
-      setTargetSquare(null);
     } catch (e) {
       alert(e.message || "Dead failed");
+      setHand(prevHand);
+      setSelectedCard(prevSelectedCard);
+      setTargetSquare(prevTargetSquare);
     } finally {
       setPosting(false);
     }

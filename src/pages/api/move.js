@@ -305,12 +305,13 @@ export default async function handler(req, res) {
       if (!allowed.includes(idx))
         return res.status(400).json({ error: "Card does not match square" });
     }
-    // Apply: remove card from hand, draw new
-    hand.splice(hand.indexOf(card), 1);
+    // Apply: remove card from hand, draw new (preserve slot position)
+    const cardIndex = hand.indexOf(card);
+    hand.splice(cardIndex, 1);
     discardPile.push(card);
     const draw = drawOne();
     if (draw) {
-      hand.push(draw);
+      hand.splice(cardIndex, 0, draw);
     }
     // Persist transactionally-ish (best effort in sequence): insert move, update hand, update game turn
     const { error: insErr } = await supabaseAdmin.from("moves").insert({
@@ -390,12 +391,13 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "No opponent chip here" });
     if (isIndexInLockedSequence(occ, idx, target.team))
       return res.status(400).json({ error: "Cannot remove locked chip" });
-    // Remove: consume card and draw new
-    hand.splice(hand.indexOf(card), 1);
+    // Remove: consume card and draw new (preserve slot position)
+    const cardIndex = hand.indexOf(card);
+    hand.splice(cardIndex, 1);
     discardPile.push(card);
     const draw = drawOne();
     if (draw) {
-      hand.push(draw);
+      hand.splice(cardIndex, 0, draw);
     }
     const { error: insErr } = await supabaseAdmin.from("moves").insert({
       game_id: gameId,
@@ -445,11 +447,12 @@ export default async function handler(req, res) {
     const allCovered =
       positions.length > 0 && positions.every((i) => isCorner(i) || occ.has(i));
     if (!allCovered) return res.status(400).json({ error: "Card is not dead" });
-    hand.splice(hand.indexOf(card), 1);
+    const cardIndex = hand.indexOf(card);
+    hand.splice(cardIndex, 1);
     discardPile.push(card);
     const draw = drawOne();
     if (draw) {
-      hand.push(draw);
+      hand.splice(cardIndex, 0, draw);
     }
     const { error: insErr } = await supabaseAdmin.from("moves").insert({
       game_id: gameId,

@@ -35,6 +35,7 @@ export default function Footer({
     return () => window.removeEventListener("resize", measure);
   }, []);
 
+
   const headingRow = (
     <div className="flex items-center gap-2 mb-1">
       <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400 select-none">
@@ -59,6 +60,22 @@ export default function Footer({
       >
         <div className="flex items-center gap-1 gap-x-2 sm:gap-1.5 snap-x snap-mandatory py-0.5">
           {hand.map((cardStr, i) => {
+            if (!cardStr || cardStr === "__pending__") {
+              return (
+                <div
+                  key={`pending-${i}`}
+                  style={
+                    cellPx
+                      ? { width: `${Math.max(40, Math.min(cellPx, 56))}px` }
+                      : undefined
+                  }
+                  className={
+                    (cellPx ? "" : "w-10 sm:w-12 md:w-14 ") +
+                    "shrink-0 snap-center relative aspect-5/7 rounded-md bg-zinc-800/50 ring-1 ring-white/10 animate-pulse"
+                  }
+                />
+              );
+            }
             const { rank, suit } = parseCard(cardStr);
             const isSelected = selectedCard === cardStr;
             const ringColorClass =
