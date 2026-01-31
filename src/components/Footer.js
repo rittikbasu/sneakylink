@@ -132,10 +132,10 @@ export default function Footer({
           }
           className={
             (cellPx ? "" : "h-14 sm:h-16 md:h-[78px] ") +
-            "shrink-0 w-24 sm:w-28 md:w-20 lg:w-28 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold transition-colors flex items-center justify-center"
+            "shrink-0 w-24 sm:w-28 md:w-20 lg:w-28 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-base font-semibold transition-colors flex items-center justify-center"
           }
         >
-          <span className="text-center leading-tight">
+          <span className="text-center leading-tight md:leading-relaxed">
             Dead
             <br />
             Card?
