@@ -938,7 +938,7 @@ export default function RoomPage() {
 
       return (
         <div className="h-dvh overflow-y-auto text-white px-4 py-6">
-          <div className="max-w-2xl mx-auto">
+          <div className="max-w-2xl lg:max-w-lg mx-auto">
             <div className="mb-6">
               <h1 className="text-2xl font-semibold mb-1 bg-linear-to-b from-white/90 via-blue-200 to-blue-500 bg-clip-text text-transparent">
                 SneakyLink
@@ -1439,28 +1439,52 @@ export default function RoomPage() {
         grouped.C.length === 1);
     const soloWinnerName = grouped[winner]?.[0]?.name;
 
+    const sidebarProps = {
+      isOpen: sidebarOpen,
+      onClose: () => setSidebarOpen(false),
+      teams: sidebarTeams,
+      scores: sidebarScores,
+      isHost,
+      onShowRules: () => {
+        setSidebarOpen(false);
+        setRulesOpen(true);
+      },
+      onEndGame: !game?.finished_at ? handleEndGame : undefined,
+      winSequences: room?.settings?.win_sequences ?? 2,
+    };
+
+    const footerProps = {
+      hand,
+      selectedCard,
+      onCardSelect: (c) => {
+        setSelectedCard(c === selectedCard ? null : c);
+        setTargetSquare(null);
+      },
+      onConfirmMove,
+      onDeadCard: onDead,
+      canConfirm,
+      canDead,
+      turnUsername: turnPlayer?.name || `Team ${game?.current_team}`,
+      teamColorClass: teamColor,
+      myTeamColor,
+      myTurn,
+    };
+
     return (
       <>
-        <Sidebar
-          isOpen={sidebarOpen}
-          onClose={() => setSidebarOpen(false)}
-          teams={sidebarTeams}
-          scores={sidebarScores}
-          isHost={isHost}
-          onShowRules={() => {
-            setSidebarOpen(false);
-            setRulesOpen(true);
-          }}
-          onEndGame={!game?.finished_at ? handleEndGame : undefined}
-          winSequences={room?.settings?.win_sequences ?? 2}
-        />
+        {/* Mobile sidebar - fixed positioned */}
+        <div className="md:hidden">
+          <Sidebar {...sidebarProps} variant="mobile" />
+        </div>
         <RulesModal isOpen={rulesOpen} onClose={() => setRulesOpen(false)} />
         <Header
           centerLabel="SneakyLink"
           onMenuClick={() => setSidebarOpen(true)}
           onRulesClick={() => setRulesOpen(true)}
         />
-        <div className="min-h-[calc(100dvh-85px)] grid place-items-center pt-2 pb-[calc(env(safe-area-inset-bottom)+120px)]">
+
+        {/* Mobile layout */}
+        <div className="md:hidden min-h-[calc(100dvh-56px)] grid place-items-center pt-2 pb-[calc(env(safe-area-inset-bottom)+120px)]">
           <BoardGrid
             chips={chips}
             onSquareClick={onSquareClick}
@@ -1472,6 +1496,29 @@ export default function RoomPage() {
             highlightColor={myTeamColor}
             lastMoveData={glowData}
           />
+        </div>
+
+        {/* Desktop layout - sidebar left of centered board */}
+        <div className="hidden md:flex h-[calc(100dvh-120px)] justify-center items-center p-6">
+          <div className="flex gap-4 w-full">
+            <div className="self-stretch">
+              <Sidebar {...sidebarProps} variant="desktop" />
+            </div>
+            <div className="flex flex-col gap-3 flex-1 min-w-0">
+              <BoardGrid
+                chips={chips}
+                onSquareClick={onSquareClick}
+                highlight={highlight}
+                allowed={allowed}
+                seqA={seqA}
+                seqB={seqB}
+                seqC={seqC}
+                highlightColor={myTeamColor}
+                lastMoveData={glowData}
+              />
+              {!game?.finished_at && <Footer {...footerProps} variant="desktop" />}
+            </div>
+          </div>
         </div>
 
         {game?.finished_at && (
@@ -1588,8 +1635,8 @@ export default function RoomPage() {
         )}
 
         {game?.finished_at ? (
-          <div className="fixed inset-x-0 bottom-0 z-30 pb-[calc(env(safe-area-inset-bottom)+8px)]">
-            <div className="w-full max-w-screen-sm sm:max-w-3xl md:max-w-5xl mx-auto px-4 h-[88px] flex items-center">
+          <div className="fixed inset-x-0 bottom-0 z-30 pb-[calc(env(safe-area-inset-bottom)+8px)] lg:right-[340px]">
+            <div className="w-full max-w-screen-sm sm:max-w-3xl md:max-w-5xl lg:max-w-[calc((100dvh-200px)*0.72)] mx-auto px-4 h-[88px] flex items-center">
               {isHost ? (
                 <div className="flex items-center justify-center gap-4 w-full">
                   <button
@@ -1691,22 +1738,10 @@ export default function RoomPage() {
             </div>
           </div>
         ) : (
-          <Footer
-            hand={hand}
-            selectedCard={selectedCard}
-            onCardSelect={(c) => {
-              setSelectedCard(c === selectedCard ? null : c);
-              setTargetSquare(null);
-            }}
-            onConfirmMove={onConfirmMove}
-            onDeadCard={onDead}
-            canConfirm={canConfirm}
-            canDead={canDead}
-            turnUsername={turnPlayer?.name || `Team ${game?.current_team}`}
-            teamColorClass={teamColor}
-            myTeamColor={myTeamColor}
-            myTurn={myTurn}
-          />
+          /* Mobile footer - fixed positioned */
+          <div className="md:hidden">
+            <Footer {...footerProps} variant="mobile" />
+          </div>
         )}
       </>
     );

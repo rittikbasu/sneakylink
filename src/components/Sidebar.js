@@ -1,5 +1,4 @@
 import { X, Users, Target } from "lucide-react";
-import QuestionIcon from "./QuestionIcon";
 
 const TEAM_CONFIG = {
   A: {
@@ -93,44 +92,53 @@ export default function Sidebar({
   onShowRules,
   onEndGame,
   winSequences = 2,
+  variant = "mobile", // "mobile" or "desktop"
 }) {
+  const isDesktop = variant === "desktop";
+
   return (
     <>
-      {/* Backdrop */}
-      <div
-        className={
-          "fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300 " +
-          (isOpen
-            ? "opacity-100 pointer-events-auto"
-            : "opacity-0 pointer-events-none")
-        }
-        onClick={onClose}
-      />
+      {/* Backdrop - only for mobile */}
+      {!isDesktop && (
+        <div
+          className={
+            "fixed inset-0 z-40 bg-black/60 backdrop-blur-sm transition-opacity duration-300 " +
+            (isOpen
+              ? "opacity-100 pointer-events-auto"
+              : "opacity-0 pointer-events-none")
+          }
+          onClick={onClose}
+        />
+      )}
 
-      {/* Sidebar */}
+      {/* Sidebar panel */}
       <div
         className={
-          "fixed inset-y-0 left-0 w-80 max-w-[85vw] z-50 overflow-y-auto border-r border-white/10 " +
-          "bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_60%,black_100%)] backdrop-blur " +
-          "transition-all duration-300 " +
-          (isOpen
-            ? "translate-x-0 opacity-100 pointer-events-auto"
-            : "-translate-x-full opacity-0 pointer-events-none")
+          isDesktop
+            ? "w-72 h-full overflow-y-auto border border-white/10 rounded-2xl bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_60%,black_100%)]"
+            : "fixed inset-y-0 left-0 w-80 max-w-[85vw] z-50 overflow-y-auto border-r border-white/10 " +
+              "bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_60%,black_100%)] backdrop-blur " +
+              "transition-all duration-300 " +
+              (isOpen
+                ? "translate-x-0 opacity-100 pointer-events-auto"
+                : "-translate-x-full opacity-0 pointer-events-none")
         }
       >
         <div className="flex flex-col h-full">
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b border-white/10">
-            <h2 className="text-lg font-semibold bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
-              Game Info
+          <div className={isDesktop ? "flex items-center justify-center p-4" : "flex items-center justify-between p-4 border-b border-white/10"}>
+            <h2 className={isDesktop ? "text-2xl font-semibold bg-linear-to-b from-white/90 via-blue-200 to-blue-500 bg-clip-text text-transparent" : "text-xl font-semibold bg-linear-to-b from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent"}>
+              {isDesktop ? "SneakyLink" : "Game Info"}
             </h2>
-            <button
-              onClick={onClose}
-              className="p-2 rounded-lg hover:bg-white/10 transition-colors"
-              aria-label="Close menu"
-            >
-              <X className="w-5 h-5" />
-            </button>
+            {!isDesktop && (
+              <button
+                onClick={onClose}
+                className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                aria-label="Close menu"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            )}
           </div>
 
           {/* Content */}
@@ -191,15 +199,14 @@ export default function Sidebar({
           <div className="p-4 border-t border-white/10 flex gap-2">
             <button
               onClick={onShowRules}
-              className="flex-1 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-700 text-zinc-200 font-semibold transition-colors flex items-center justify-center gap-2"
+              className="flex-1 py-3 rounded-xl bg-zinc-900 hover:bg-zinc-700 text-zinc-200 font-semibold transition-colors"
             >
-              <QuestionIcon className="w-4 h-4 text-zinc-400" />
               Show Rules
             </button>
             {isHost && onEndGame && (
               <button
                 onClick={onEndGame}
-                className="flex-1 py-3 rounded-lg bg-red-600/80 hover:bg-red-600 text-zinc-200 font-semibold transition-colors"
+                className="flex-1 py-3 rounded-xl bg-red-600/80 hover:bg-red-600 text-zinc-200 font-semibold transition-colors"
               >
                 End Game
               </button>

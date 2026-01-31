@@ -18,7 +18,7 @@ export default function PlayingCard({ type, rank, suit, interactive = true }) {
   if (type === "free") {
     return (
       <div className="relative aspect-5/7 rounded-md bg-linear-to-br from-emerald-900/30 to-teal-900/30 ring-1 ring-emerald-600/30 shadow-sm grid place-items-center select-none">
-        <div className="text-[10px] sm:text-xs font-semibold text-emerald-300 tracking-wide">
+        <div className="text-[10px] sm:text-xs md:text-[10px] lg:text-xs font-semibold text-emerald-300 tracking-wide">
           FREE
         </div>
       </div>
@@ -45,12 +45,12 @@ export default function PlayingCard({ type, rank, suit, interactive = true }) {
       }
     >
       <div
-        className={`absolute top-px left-1 ${cornerColor} text-[10px] sm:text-xs font-semibold select-none`}
+        className={`absolute top-px left-1 ${cornerColor} text-[10px] sm:text-xs md:text-[10px] lg:text-xs font-semibold select-none`}
       >
         {rank}
       </div>
       <div
-        className={`absolute bottom-px right-1 ${cornerColor} text-[10px] sm:text-xs font-semibold select-none`}
+        className={`absolute bottom-px right-1 ${cornerColor} text-[10px] sm:text-xs md:text-[10px] lg:text-xs font-semibold select-none`}
       >
         <span className="inline-block rotate-180">{rank}</span>
       </div>
@@ -59,19 +59,19 @@ export default function PlayingCard({ type, rank, suit, interactive = true }) {
           <div className={`flex items-center ${jackColor}`}>
             {isTwoEyed ? (
               <>
-                <Eye className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2.3} />
+                <Eye className="w-5 h-5 sm:w-6 sm:h-6 md:w-5 md:h-5 lg:w-6 lg:h-6" strokeWidth={2.3} />
                 <Eye
-                  className="w-5 h-5 sm:w-6 sm:h-6 -ml-1"
+                  className="w-5 h-5 sm:w-6 sm:h-6 md:w-5 md:h-5 lg:w-6 lg:h-6 -ml-1"
                   strokeWidth={2.3}
                 />
               </>
             ) : (
-              <Eye className="w-5 h-5 sm:w-6 sm:h-6" strokeWidth={2.3} />
+              <Eye className="w-5 h-5 sm:w-6 sm:h-6 md:w-5 md:h-5 lg:w-6 lg:h-6" strokeWidth={2.3} />
             )}
           </div>
         ) : Icon ? (
           <Icon
-            className={`${suitColor} w-5 h-5 sm:w-6 sm:h-6`}
+            className={`${suitColor} w-5 h-5 sm:w-6 sm:h-6 md:w-5 md:h-5 lg:w-6 lg:h-6`}
             strokeWidth={2.3}
             fill={
               suit === "heart" || suit === "spade" ? "currentColor" : "none"

@@ -134,10 +134,10 @@ export default function RulesModal({ isOpen, onClose }) {
         </div>
 
         {/* Footer */}
-        <div className="p-4 sm:p-6 border-t border-white/10 shrink-0">
+        <div className="p-4 sm:p-6 border-t border-white/10 shrink-0 flex items-center justify-center">
           <button
             onClick={onClose}
-            className="w-full py-3.5 rounded-xl bg-linear-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-semibold transition-all shadow-lg shadow-blue-600/20 hover:shadow-xl hover:shadow-blue-600/30"
+            className="sm:w-72 w-full py-3.5 rounded-xl bg-linear-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-semibold transition-all shadow-lg shadow-blue-600/20 hover:shadow-xl hover:shadow-blue-600/30"
           >
             Got It!
           </button>
