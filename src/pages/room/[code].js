@@ -1763,7 +1763,7 @@ export default function RoomPage() {
               {game?.finished_at && (
                 <div className="hidden md:block w-full max-w-screen-sm sm:max-w-3xl md:max-w-[min(calc(100dvw-360px),calc((100dvh-240px)/1.4))] mx-auto">
                   <div className="rounded-xl p-2.5 border border-white/10">
-                    <div className="h-[88px] flex items-center">
+                    <div className="flex items-center">
                       {gameOverControls}
                     </div>
                   </div>

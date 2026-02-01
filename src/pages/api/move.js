@@ -313,22 +313,6 @@ export default async function handler(req, res) {
     if (draw) {
       hand.splice(cardIndex, 0, draw);
     }
-    // Persist transactionally-ish (best effort in sequence): insert move, update hand, update game turn
-    const { error: insErr } = await supabaseAdmin.from("moves").insert({
-      game_id: gameId,
-      player_id: playerId,
-      turn_index: game.turn_index,
-      move_type: "place",
-      team: player.team,
-      card,
-      coord,
-    });
-    if (insErr) return res.status(500).json({ error: insErr.message });
-    const { error: handUpdErr } = await supabaseAdmin
-      .from("hands")
-      .update({ cards: hand })
-      .eq("id", handRow.id);
-    if (handUpdErr) return res.status(500).json({ error: handUpdErr.message });
     // Sequence detection and potential finish
     const newOcc = new Map(occ);
     // idx is already calculated above
@@ -357,23 +341,41 @@ export default async function handler(req, res) {
       .eq("id", game.room_id)
       .single();
     const needed = (roomRow?.settings?.win_sequences ?? 2) | 0;
+    let roomStatus = null;
     if (seqCount >= needed) {
       gameUpdate = {
         ...gameUpdate,
         finished_at: new Date().toISOString(),
         winner_team: player.team,
       };
-      await supabaseAdmin
-        .from("rooms")
-        .update({ status: "finished" })
-        .eq("id", game.room_id);
+      roomStatus = "finished";
     }
-    const { error: gameUpdErr } = await supabaseAdmin
-      .from("games")
-      .update(gameUpdate)
-      .eq("id", gameId)
-      .eq("turn_index", game.turn_index);
-    if (gameUpdErr) return res.status(500).json({ error: gameUpdErr.message });
+    const { error: rpcErr } = await supabaseAdmin.rpc("make_move", {
+      room_id: roomId,
+      game_id: gameId,
+      player_id: playerId,
+      hand_id: handRow.id,
+      expected_turn_index: game.turn_index,
+      move_type: "place",
+      move_team: player.team,
+      move_card: card,
+      move_coord: coord,
+      new_hand: hand,
+      next_turn_index: gameUpdate.turn_index,
+      next_team: gameUpdate.current_team,
+      draw_pile: gameUpdate.draw_pile,
+      discard_pile: gameUpdate.discard_pile,
+      board_state: gameUpdate.board_state,
+      last_move: gameUpdate.last_move,
+      finished_at: gameUpdate.finished_at || null,
+      winner_team: gameUpdate.winner_team || null,
+      room_status: roomStatus,
+    });
+    if (rpcErr) {
+      const msg = rpcErr.message || "Move failed";
+      const status = msg.includes("Turn out of date") ? 409 : 500;
+      return res.status(status).json({ error: msg });
+    }
     return res.status(200).json({ ok: true });
   }
 
@@ -399,43 +401,47 @@ export default async function handler(req, res) {
     if (draw) {
       hand.splice(cardIndex, 0, draw);
     }
-    const { error: insErr } = await supabaseAdmin.from("moves").insert({
+    delete boardState[String(idx)];
+    const gameUpdate = {
+      turn_index: game.turn_index + 1,
+      current_team: nextTeam,
+      draw_pile: drawPile,
+      discard_pile: discardPile,
+      board_state: boardState,
+      last_move: {
+        player_id: playerId,
+        type: "remove",
+        card,
+        coord,
+        team: player.team,
+      },
+    };
+    const { error: rpcErr } = await supabaseAdmin.rpc("make_move", {
+      room_id: roomId,
       game_id: gameId,
       player_id: playerId,
-      turn_index: game.turn_index,
+      hand_id: handRow.id,
+      expected_turn_index: game.turn_index,
       move_type: "remove",
-      team: player.team,
-      card,
-      coord,
+      move_team: player.team,
+      move_card: card,
+      move_coord: coord,
+      new_hand: hand,
+      next_turn_index: gameUpdate.turn_index,
+      next_team: gameUpdate.current_team,
+      draw_pile: gameUpdate.draw_pile,
+      discard_pile: gameUpdate.discard_pile,
+      board_state: gameUpdate.board_state,
+      last_move: gameUpdate.last_move,
+      finished_at: null,
+      winner_team: null,
+      room_status: null,
     });
-    if (insErr) return res.status(500).json({ error: insErr.message });
-    const { error: handUpdErr } = await supabaseAdmin
-      .from("hands")
-      .update({ cards: hand })
-      .eq("id", handRow.id);
-    if (handUpdErr) return res.status(500).json({ error: handUpdErr.message });
-
-    delete boardState[String(idx)];
-
-    const { error: gameUpdErr } = await supabaseAdmin
-      .from("games")
-      .update({
-        turn_index: game.turn_index + 1,
-        current_team: nextTeam,
-        draw_pile: drawPile,
-        discard_pile: discardPile,
-        board_state: boardState,
-        last_move: {
-          player_id: playerId,
-          type: "remove",
-          card,
-          coord,
-          team: player.team,
-        },
-      })
-      .eq("id", gameId)
-      .eq("turn_index", game.turn_index);
-    if (gameUpdErr) return res.status(500).json({ error: gameUpdErr.message });
+    if (rpcErr) {
+      const msg = rpcErr.message || "Move failed";
+      const status = msg.includes("Turn out of date") ? 409 : 500;
+      return res.status(status).json({ error: msg });
+    }
     return res.status(200).json({ ok: true });
   }
 
@@ -454,58 +460,82 @@ export default async function handler(req, res) {
     if (draw) {
       hand.splice(cardIndex, 0, draw);
     }
-    const { error: insErr } = await supabaseAdmin.from("moves").insert({
+    const gameUpdate = {
+      turn_index: game.turn_index + 1,
+      current_team: nextTeam,
+      draw_pile: drawPile,
+      discard_pile: discardPile,
+      last_move: {
+        player_id: playerId,
+        type: "dead",
+        card,
+        team: player.team,
+      },
+    };
+    const { error: rpcErr } = await supabaseAdmin.rpc("make_move", {
+      room_id: roomId,
       game_id: gameId,
       player_id: playerId,
-      turn_index: game.turn_index,
+      hand_id: handRow.id,
+      expected_turn_index: game.turn_index,
       move_type: "dead",
-      team: player.team,
-      card,
+      move_team: player.team,
+      move_card: card,
+      move_coord: null,
+      new_hand: hand,
+      next_turn_index: gameUpdate.turn_index,
+      next_team: gameUpdate.current_team,
+      draw_pile: gameUpdate.draw_pile,
+      discard_pile: gameUpdate.discard_pile,
+      board_state: game.board_state,
+      last_move: gameUpdate.last_move,
+      finished_at: null,
+      winner_team: null,
+      room_status: null,
     });
-    if (insErr) return res.status(500).json({ error: insErr.message });
-    const { error: handUpdErr } = await supabaseAdmin
-      .from("hands")
-      .update({ cards: hand })
-      .eq("id", handRow.id);
-    if (handUpdErr) return res.status(500).json({ error: handUpdErr.message });
-    const { error: gameUpdErr } = await supabaseAdmin
-      .from("games")
-      .update({
-        turn_index: game.turn_index + 1,
-        current_team: nextTeam,
-        draw_pile: drawPile,
-        discard_pile: discardPile,
-        last_move: {
-          player_id: playerId,
-          type: "dead",
-          card,
-          team: player.team,
-        },
-      })
-      .eq("id", gameId)
-      .eq("turn_index", game.turn_index);
-    if (gameUpdErr) return res.status(500).json({ error: gameUpdErr.message });
+    if (rpcErr) {
+      const msg = rpcErr.message || "Move failed";
+      const status = msg.includes("Turn out of date") ? 409 : 500;
+      return res.status(status).json({ error: msg });
+    }
     return res.status(200).json({ ok: true });
   }
 
   if (moveType === "timeout") {
-    const { error: insErr } = await supabaseAdmin.from("moves").insert({
+    const gameUpdate = {
+      turn_index: game.turn_index + 1,
+      current_team: nextTeam,
+      draw_pile: drawPile,
+      discard_pile: discardPile,
+      board_state: game.board_state,
+      last_move: { player_id: playerId, type: "timeout", team: player.team },
+    };
+    const { error: rpcErr } = await supabaseAdmin.rpc("make_move", {
+      room_id: roomId,
       game_id: gameId,
       player_id: playerId,
-      turn_index: game.turn_index,
+      hand_id: null,
+      expected_turn_index: game.turn_index,
       move_type: "timeout",
-      team: player.team,
+      move_team: player.team,
+      move_card: null,
+      move_coord: null,
+      new_hand: null,
+      next_turn_index: gameUpdate.turn_index,
+      next_team: gameUpdate.current_team,
+      draw_pile: gameUpdate.draw_pile,
+      discard_pile: gameUpdate.discard_pile,
+      board_state: gameUpdate.board_state,
+      last_move: gameUpdate.last_move,
+      finished_at: null,
+      winner_team: null,
+      room_status: null,
     });
-    if (insErr) return res.status(500).json({ error: insErr.message });
-    const { error: gameUpdErr } = await supabaseAdmin
-      .from("games")
-      .update({
-        turn_index: game.turn_index + 1,
-        current_team: nextTeam,
-        last_move: { player_id: playerId, type: "timeout", team: player.team },
-      })
-      .eq("id", gameId);
-    if (gameUpdErr) return res.status(500).json({ error: gameUpdErr.message });
+    if (rpcErr) {
+      const msg = rpcErr.message || "Move failed";
+      const status = msg.includes("Turn out of date") ? 409 : 500;
+      return res.status(status).json({ error: msg });
+    }
     return res.status(200).json({ ok: true });
   }
 
