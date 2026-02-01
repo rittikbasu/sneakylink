@@ -2,16 +2,14 @@ import { useRouter } from "next/router";
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
-import Header from "@/components/Header";
-import Footer from "@/components/Footer";
-import BoardGrid from "@/components/BoardGrid";
-import Sidebar from "@/components/Sidebar";
-import RulesModal from "@/components/RulesModal";
 import layout from "@/data/boardLayout";
 import { parseCard, formatCard } from "@/lib/deck";
 import { useResumeSync } from "@/features/room/hooks/useResumeSync";
 import { useGameData } from "@/features/room/hooks/useGameData";
 import { useMoveActions } from "@/features/room/hooks/useMoveActions";
+import GameView from "@/features/room/views/GameView";
+import LobbyView from "@/features/room/views/LobbyView";
+import RoomGate from "@/features/room/views/RoomGate";
 import {
   buildPlayersByTurn,
   buildSidebarScores,
@@ -20,16 +18,7 @@ import {
   groupPlayersByTeam,
 } from "@/features/room/selectors/roomSelectors";
 import { validateRoomCode } from "@/lib/id";
-import {
-  Copy,
-  Users,
-  Check,
-  Settings,
-  Trophy,
-  Frown,
-  Play,
-  Share2,
-} from "lucide-react";
+import { Play } from "lucide-react";
 
 const POSITIONS_BY_CARD = (() => {
   const map = new Map();
@@ -784,419 +773,31 @@ export default function RoomPage() {
         </div>
       );
     if (room.status === "lobby") {
-      const numTeams = room.settings?.teams ?? 2;
-      const aPlayers = players.filter((p) => p.team === "A");
-      const bPlayers = players.filter((p) => p.team === "B");
-      const cPlayers = players.filter((p) => p.team === "C");
-      const teamCounts =
-        numTeams === 2
-          ? [aPlayers.length, bPlayers.length]
-          : [aPlayers.length, bPlayers.length, cPlayers.length];
-      const balanced = teamCounts.every((c) => c === teamCounts[0] && c > 0);
-      const myTeam = me?.team;
-      const canShare = typeof navigator !== "undefined" && !!navigator.share;
-
       return (
-        <div className="h-dvh overflow-y-auto text-white px-4 py-6">
-          <div className="max-w-2xl lg:max-w-lg mx-auto">
-            <div className="mb-6">
-              <h1 className="text-2xl font-semibold mb-1 bg-linear-to-b from-white/90 via-blue-200 to-blue-500 bg-clip-text text-transparent">
-                SneakyLink
-              </h1>
-            </div>
-
-            <div className="space-y-4">
-              {isHost && (
-                <div className="text-sm pl-1 tracking-wider text-gray-500">
-                  You&apos;re the host
-                </div>
-              )}
-              <div className="bg-zinc-900/60 backdrop-blur rounded-2xl p-4 border border-white/5">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
-                      ROOM CODE
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl font-mono font-bold tracking-widest">
-                        {room.code}
-                      </span>
-                      <button
-                        onClick={copyCode}
-                        className="p-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 transition-colors"
-                      >
-                        {codeCopied ? (
-                          <Check className="w-4 h-4 text-green-500" />
-                        ) : (
-                          <Copy className="w-4 h-4" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
-                      Link to this game
-                    </div>
-                    <div className="flex items-center justify-end">
-                      <button
-                        onClick={copyInvite}
-                        className="text-xl text-blue-500 font-semibold flex items-center gap-2"
-                      >
-                        {linkCopied ? (
-                          <Check className="w-5 h-5 text-green-500" />
-                        ) : canShare ? (
-                          <Share2 className="w-5 h-5" />
-                        ) : (
-                          <Copy className="w-5 h-5" />
-                        )}
-                        <span>{canShare ? "Share Link" : "Copy Link"}</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-linear-to-br from-emerald-950/50 to-emerald-900/20 rounded-2xl border border-emerald-900/40 overflow-hidden">
-                  <div className="bg-emerald-950/30 px-3 py-2 border-b border-emerald-900/40">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                        <span className="font-semibold text-emerald-400 text-sm">
-                          Team A
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1 text-emerald-400/70 text-xs">
-                        <Users className="w-3 h-3" />
-                        <span>{aPlayers.length}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div
-                    className={`py-3 px-1.5 space-y-1.5 ${
-                      numTeams === 3 ? "min-h-[123px]" : "min-h-[100px]"
-                    }`}
-                  >
-                    {aPlayers.length > 0 ? (
-                      aPlayers.map((p) => (
-                        <div
-                          key={p.id}
-                          className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-white/5"
-                        >
-                          <div className="text-sm font-medium truncate">
-                            {p.name}
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            {p.id === playerId && (
-                              <div className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-medium">
-                                YOU
-                              </div>
-                            )}
-                            {p.is_host && p.id !== playerId && (
-                              <div className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-medium">
-                                HOST
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="h-[84px] grid place-items-center text-gray-600 text-sm">
-                        Empty
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="bg-linear-to-br from-sky-950/50 to-sky-900/20 rounded-2xl border border-sky-900/40 overflow-hidden">
-                  <div className="bg-sky-950/30 px-3 py-2 border-b border-sky-900/40">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-sky-500" />
-                        <span className="font-semibold text-sky-400 text-sm">
-                          Team B
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1 text-sky-400/70 text-xs">
-                        <Users className="w-3 h-3" />
-                        <span>{bPlayers.length}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div
-                    className={`py-3 px-1.5 space-y-1.5 ${
-                      numTeams === 3 ? "min-h-[123px]" : "min-h-[100px]"
-                    }`}
-                  >
-                    {bPlayers.length > 0 ? (
-                      bPlayers.map((p) => (
-                        <div
-                          key={p.id}
-                          className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-white/5"
-                        >
-                          <div className="text-sm font-medium truncate">
-                            {p.name}
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            {p.id === playerId && (
-                              <div className="text-[9px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-400 font-medium">
-                                YOU
-                              </div>
-                            )}
-                            {p.is_host && p.id !== playerId && (
-                              <div className="text-[9px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-400 font-medium">
-                                HOST
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="h-[84px] grid place-items-center text-gray-600 text-sm">
-                        Empty
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {numTeams === 3 && (
-                  <div className="bg-linear-to-br from-rose-950/50 to-rose-900/20 rounded-2xl border border-rose-900/40 overflow-hidden">
-                    <div className="bg-rose-950/30 px-3 py-2 border-b border-rose-900/40">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-rose-500" />
-                          <span className="font-semibold text-rose-400 text-sm">
-                            Team C
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-1 text-rose-400/70 text-xs">
-                          <Users className="w-3 h-3" />
-                          <span>{cPlayers.length}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div
-                      className={`py-3 px-1.5 space-y-1.5 ${
-                        numTeams === 3 ? "min-h-[123px]" : "min-h-[100px]"
-                      }`}
-                    >
-                      {cPlayers.length > 0 ? (
-                        cPlayers.map((p) => (
-                          <div
-                            key={p.id}
-                            className="flex items-center justify-between px-2 py-1.5 rounded-lg bg-white/5"
-                          >
-                            <div className="text-sm font-medium truncate">
-                              {p.name}
-                            </div>
-                            <div className="flex items-center gap-1.5">
-                              {p.id === playerId && (
-                                <div className="text-[9px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 font-medium">
-                                  YOU
-                                </div>
-                              )}
-                              {p.is_host && p.id !== playerId && (
-                                <div className="text-[9px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 font-medium">
-                                  HOST
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="h-[84px] grid place-items-center text-gray-600 text-sm">
-                          Empty
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {numTeams === 3 && me && (
-                  <div className="bg-zinc-900/60 backdrop-blur rounded-2xl border border-white/5 overflow-hidden flex flex-col h-full">
-                    <div className="px-3 py-2 border-zinc-800/40">
-                      <span className="text-zinc-400 text-sm">Your Team</span>
-                    </div>
-                    <div className="pb-3 px-1.5 flex-1 flex flex-col">
-                      <div className="flex-1 flex flex-col justify-evenly gap-1.5 w-full px-1">
-                        <button
-                          onClick={() => switchTeam("A")}
-                          className={`w-full px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                            myTeam === "A"
-                              ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20"
-                              : "bg-zinc-800 text-gray-400 hover:bg-zinc-700"
-                          }`}
-                        >
-                          Team A
-                        </button>
-                        <button
-                          onClick={() => switchTeam("B")}
-                          className={`w-full px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                            myTeam === "B"
-                              ? "bg-sky-600 text-white shadow-lg shadow-sky-600/20"
-                              : "bg-zinc-800 text-gray-400 hover:bg-zinc-700"
-                          }`}
-                        >
-                          Team B
-                        </button>
-                        <button
-                          onClick={() => switchTeam("C")}
-                          className={`w-full px-4 py-1.5 rounded-lg text-sm font-semibold transition-all ${
-                            myTeam === "C"
-                              ? "bg-rose-600/80 text-white shadow-lg shadow-rose-600/20"
-                              : "bg-zinc-800 text-gray-400 hover:bg-zinc-700"
-                          }`}
-                        >
-                          Team C
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {me && numTeams === 2 && (
-                <div className="bg-zinc-900/60 backdrop-blur rounded-2xl p-4 border border-white/5">
-                  <div className="flex items-center justify-between gap-4 flex-wrap">
-                    <div className="text-sm text-gray-400">Your team</div>
-                    <div className="flex gap-2 flex-nowrap">
-                      <button
-                        onClick={() => switchTeam("A")}
-                        className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-                          myTeam === "A"
-                            ? "bg-emerald-600 text-white"
-                            : "bg-zinc-800 text-gray-400 hover:bg-zinc-700"
-                        }`}
-                      >
-                        Team A
-                      </button>
-                      <button
-                        onClick={() => switchTeam("B")}
-                        className={`px-4 py-2 rounded-xl text-sm font-semibold transition-all ${
-                          myTeam === "B"
-                            ? "bg-sky-600 text-white"
-                            : "bg-zinc-800 text-gray-400 hover:bg-zinc-700"
-                        }`}
-                      >
-                        Team B
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {isHost ? (
-                <div className="bg-zinc-900/60 backdrop-blur rounded-2xl p-4 border border-white/5">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Settings className="w-4 h-4 text-gray-500" />
-                    <span className="text-sm text-gray-400">Game Settings</span>
-                  </div>
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-300">Teams</span>
-                      <div className="flex gap-1 rounded-lg bg-zinc-800 p-1">
-                        <button
-                          onClick={() => updateSettings({ teams: 2 })}
-                          className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                            numTeams === 2
-                              ? "bg-blue-600 text-white"
-                              : "text-gray-400 hover:text-white"
-                          }`}
-                        >
-                          2
-                        </button>
-                        <button
-                          onClick={() => updateSettings({ teams: 3 })}
-                          className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                            numTeams === 3
-                              ? "bg-blue-600 text-white"
-                              : "text-gray-400 hover:text-white"
-                          }`}
-                        >
-                          3
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-gray-300">
-                        Sequences to win
-                      </span>
-                      <div className="flex gap-1 rounded-lg bg-zinc-800 p-1">
-                        <button
-                          onClick={() => updateSettings({ win_sequences: 1 })}
-                          className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                            (room.settings?.win_sequences ?? 2) === 1
-                              ? "bg-blue-600 text-white"
-                              : "text-gray-400 hover:text-white"
-                          }`}
-                        >
-                          1
-                        </button>
-                        <button
-                          onClick={() => updateSettings({ win_sequences: 2 })}
-                          className={`px-3 py-1 rounded text-xs font-medium transition-colors ${
-                            (room.settings?.win_sequences ?? 2) === 2
-                              ? "bg-blue-600 text-white"
-                              : "text-gray-400 hover:text-white"
-                          }`}
-                        >
-                          2
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {isHost ? (
-                <div className="space-y-3">
-                  {!balanced && (
-                    <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 px-4 py-2.5 text-center">
-                      <p className="text-xs text-amber-400">
-                        Teams must be balanced to start
-                      </p>
-                    </div>
-                  )}
-                  <button
-                    onClick={startGame}
-                    disabled={starting || !balanced}
-                    className="w-full py-3.5 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-bold shadow-xl disabled:shadow-none transition-all"
-                  >
-                    {starting ? "Starting..." : "Start Game"}
-                  </button>
-                </div>
-              ) : (
-                <div className="rounded-2xl bg-zinc-900/60 backdrop-blur border border-white/5 px-4 py-6 text-center">
-                  <div className="flex items-center justify-center gap-2 text-gray-400">
-                    <div className="w-2 h-2 rounded-full bg-gray-600 animate-pulse" />
-                    <span className="text-sm">Waiting for host to start</span>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <LobbyView
+          room={room}
+          players={players}
+          playerId={playerId}
+          isHost={isHost}
+          me={me}
+          codeCopied={codeCopied}
+          linkCopied={linkCopied}
+          onCopyCode={copyCode}
+          onCopyInvite={copyInvite}
+          onSwitchTeam={switchTeam}
+          onUpdateSettings={updateSettings}
+          onStartGame={startGame}
+          starting={starting}
+        />
       );
     }
 
     if (!playerId) {
       return (
-        <div className="h-dvh flex flex-col items-center justify-center p-6 text-center">
-          <h1 className="text-3xl font-bold mb-4 text-white">
-            {game?.finished_at ? "Game Finished" : "Game in Progress"}
-          </h1>
-          <p className="text-zinc-400 mb-8 max-w-md leading-relaxed">
-            {game?.finished_at
-              ? "This game has already ended. Please ask the host for a new code."
-              : "This game has already started. You can join the next round once the host creates a new lobby."}
-          </p>
-          <button
-            onClick={() => router.push("/")}
-            className="px-8 py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-semibold transition-all"
-          >
-            Back to Home
-          </button>
-        </div>
+        <RoomGate
+          gameFinished={!!game?.finished_at}
+          onBack={() => router.push("/")}
+        />
       );
     }
 
@@ -1327,192 +928,43 @@ export default function RoomPage() {
       </>
     );
 
+    const boardProps = {
+      chips,
+      onSquareClick,
+      highlight,
+      allowed,
+      seqA,
+      seqB,
+      seqC,
+      highlightColor: myTeamColor,
+      lastMoveData: glowData,
+    };
+
+    const gameOverOverlayProps = {
+      winner,
+      isWinner,
+      activeTeams,
+      isSolo,
+      soloWinnerName,
+      grouped,
+      sidebarScores,
+    };
+
     return (
-      <>
-        {/* Mobile sidebar - fixed positioned */}
-        <div className="md:hidden">
-          <Sidebar {...sidebarProps} variant="mobile" />
-        </div>
-        <RulesModal isOpen={rulesOpen} onClose={() => setRulesOpen(false)} />
-        <Header
-          centerLabel="SneakyLink"
-          onMenuClick={() => setSidebarOpen(true)}
-          onRulesClick={() => setRulesOpen(true)}
-        />
-
-        {/* Mobile layout */}
-        <div className="md:hidden min-h-[calc(100dvh-56px)] grid place-items-center pt-2 pb-[calc(env(safe-area-inset-bottom)+120px)]">
-          <BoardGrid
-            chips={chips}
-            onSquareClick={onSquareClick}
-            highlight={highlight}
-            allowed={allowed}
-            seqA={seqA}
-            seqB={seqB}
-            seqC={seqC}
-            highlightColor={myTeamColor}
-            lastMoveData={glowData}
-          />
-        </div>
-
-        {/* Desktop layout - sidebar left of centered board */}
-        <div className="hidden md:flex h-[calc(100dvh-120px)] justify-center items-center p-6">
-          <div className="flex gap-4 w-full">
-            <div className="self-stretch">
-              <Sidebar {...sidebarProps} variant="desktop" />
-            </div>
-            <div className="flex flex-col gap-3 flex-1 min-w-0">
-              <BoardGrid
-                chips={chips}
-                onSquareClick={onSquareClick}
-                highlight={highlight}
-                allowed={allowed}
-                seqA={seqA}
-                seqB={seqB}
-                seqC={seqC}
-                highlightColor={myTeamColor}
-                lastMoveData={glowData}
-              />
-              {!game?.finished_at && <Footer {...footerProps} variant="desktop" />}
-              {game?.finished_at && (
-                <div className="hidden md:block w-full max-w-screen-sm sm:max-w-3xl md:max-w-[min(calc(100dvw-360px),calc((100dvh-240px)/1.4))] mx-auto">
-                  <div className="rounded-xl p-2.5 border border-white/10">
-                    <div className="flex items-center">
-                      {gameOverControls}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {game?.finished_at && (
-          <>
-            <div
-              className={
-                "fixed inset-0 z-50 bg-black/70 backdrop-blur-sm transition-opacity duration-300 " +
-                (showGameOver
-                  ? "opacity-100 pointer-events-auto"
-                  : "opacity-0 pointer-events-none")
-              }
-              onClick={() => setShowGameOver(false)}
-            />
-            <div
-              className={
-                "fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[calc(100%-2rem)] max-w-md z-50 flex flex-col rounded-2xl border border-white/10 bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_70%,black_100%)] backdrop-blur transition duration-300 transform " +
-                (showGameOver
-                  ? "opacity-100 scale-100 pointer-events-auto"
-                  : "opacity-0 scale-95 pointer-events-none")
-              }
-            >
-              <div className="flex items-center p-4 border-b border-white/10 shrink-0">
-                <h2 className="text-xl font-bold bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
-                  Game Results
-                </h2>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                <div className="text-center">
-                  <div
-                    className={`inline-flex items-center justify-center w-20 h-20 rounded-full mb-4 ${
-                      isWinner
-                        ? "bg-amber-500/20 ring-4 ring-amber-500/30"
-                        : "bg-zinc-500/15 ring-4 ring-zinc-500/30"
-                    }`}
-                  >
-                    {isWinner ? (
-                      <Trophy className="w-10 h-10 text-yellow-500" />
-                    ) : (
-                      <Frown className="w-10 h-10 text-zinc-300" />
-                    )}
-                  </div>
-                  <h1 className="text-3xl font-bold mb-2 text-white">
-                    {isWinner
-                      ? "You Won!"
-                      : winner
-                      ? "Game Over!"
-                      : "Game Ended"}
-                  </h1>
-                  <p
-                    className={`text-lg font-semibold ${
-                      winner === "A"
-                        ? "text-emerald-400"
-                        : winner === "B"
-                        ? "text-sky-400"
-                        : winner === "C"
-                        ? "text-rose-400"
-                        : "text-gray-400"
-                    }`}
-                  >
-                    {winner
-                      ? isSolo
-                        ? `${soloWinnerName || `Team ${winner}`} Wins`
-                        : `Team ${winner} Wins`
-                      : "No winner"}
-                  </p>
-                </div>
-
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
-                    Final Scores
-                  </h3>
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20">
-                      <span className="text-emerald-400 font-semibold">
-                        {(isSolo ? grouped.A[0]?.name : "Team A") || "Team A"}
-                      </span>
-                      <span className="text-emerald-400 font-bold text-lg">
-                        {sidebarScores?.A}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-sky-500/10 border border-sky-500/20">
-                      <span className="text-sky-400 font-semibold">
-                        {(isSolo ? grouped.B[0]?.name : "Team B") || "Team B"}
-                      </span>
-                      <span className="text-sky-400 font-bold text-lg">
-                        {sidebarScores?.B}
-                      </span>
-                    </div>
-                    {activeTeams === 3 && (
-                      <div className="flex items-center justify-between px-4 py-3 rounded-lg bg-rose-500/10 border border-rose-500/20">
-                        <span className="text-rose-400 font-semibold">
-                          {(isSolo ? grouped.C[0]?.name : "Team C") || "Team C"}
-                        </span>
-                        <span className="text-rose-400 font-bold text-lg">
-                          {sidebarScores?.C}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="p-6 border-t border-white/10 shrink-0">
-                <button
-                  onClick={() => setShowGameOver(false)}
-                  className="w-full py-3.5 rounded-xl bg-linear-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-semibold transition-all shadow-lg shadow-blue-600/20 hover:shadow-xl hover:shadow-blue-600/30"
-                >
-                  View Board
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-
-        {game?.finished_at ? (
-          <div className="fixed inset-x-0 bottom-0 z-30 pb-[calc(env(safe-area-inset-bottom)+8px)] md:hidden">
-            <div className="w-full max-w-screen-sm sm:max-w-3xl mx-auto px-4 h-[88px] flex items-center">
-              {gameOverControls}
-            </div>
-          </div>
-        ) : (
-          /* Mobile footer - fixed positioned */
-          <div className="md:hidden">
-            <Footer {...footerProps} variant="mobile" />
-          </div>
-        )}
-      </>
+      <GameView
+        sidebarProps={sidebarProps}
+        rulesOpen={rulesOpen}
+        onOpenRules={() => setRulesOpen(true)}
+        onCloseRules={() => setRulesOpen(false)}
+        onOpenSidebar={() => setSidebarOpen(true)}
+        boardProps={boardProps}
+        footerProps={footerProps}
+        gameFinished={!!game?.finished_at}
+        gameOverControls={gameOverControls}
+        showGameOver={showGameOver}
+        onCloseGameOver={() => setShowGameOver(false)}
+        gameOverOverlayProps={gameOverOverlayProps}
+      />
     );
   };
 
