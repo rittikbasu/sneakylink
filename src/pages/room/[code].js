@@ -9,6 +9,11 @@ import Sidebar from "@/components/Sidebar";
 import RulesModal from "@/components/RulesModal";
 import layout from "@/data/boardLayout";
 import { parseCard, formatCard } from "@/lib/deck";
+import {
+  computeSequenceSets,
+  indexToCoord,
+  isCornerIndex,
+} from "@/lib/boardRules";
 import { validateRoomCode } from "@/lib/id";
 import {
   Copy,
@@ -20,7 +25,6 @@ import {
   Play,
   Share2,
 } from "lucide-react";
-import { ALL_LINES } from "@/lib/lines";
 import { countMaxSequences } from "@/lib/sequences";
 
 const POSITIONS_BY_CARD = (() => {
@@ -38,64 +42,6 @@ const POSITIONS_BY_CARD = (() => {
   }
   return map;
 })();
-
-const coordOfIndex = (idx) => {
-  const r = Math.floor(idx / 10);
-  const c = idx % 10;
-  return `${r},${c}`;
-};
-
-const cornerIndex = (idx) => {
-  const r = Math.floor(idx / 10);
-  const c = idx % 10;
-  return (
-    (r === 0 && c === 0) ||
-    (r === 0 && c === 9) ||
-    (r === 9 && c === 0) ||
-    (r === 9 && c === 9)
-  );
-};
-
-const computeSequenceSets = (chips) => {
-  function nonCorner(line) {
-    return line.filter((i) => !cornerIndex(i));
-  }
-  function acceptedLines(team) {
-    const used = new Set();
-    const acc = [];
-    for (const line of ALL_LINES) {
-      let ok = true;
-      for (const idx of line) {
-        if (cornerIndex(idx)) continue;
-        if (chips.get(idx) !== team) {
-          ok = false;
-          break;
-        }
-      }
-      if (!ok) continue;
-      let overlap = 0;
-      for (const idx of nonCorner(line)) {
-        if (used.has(idx)) overlap++;
-        if (overlap > 1) break;
-      }
-      if (overlap <= 1) {
-        acc.push(line);
-        for (const idx of nonCorner(line)) used.add(idx);
-      }
-    }
-    return acc;
-  }
-  const aLines = acceptedLines("A");
-  const bLines = acceptedLines("B");
-  const cLines = acceptedLines("C");
-  const seqA = new Set();
-  const seqB = new Set();
-  const seqC = new Set();
-  for (const line of aLines) for (const i of nonCorner(line)) seqA.add(i);
-  for (const line of bLines) for (const i of nonCorner(line)) seqB.add(i);
-  for (const line of cLines) for (const i of nonCorner(line)) seqC.add(i);
-  return { seqA, seqB, seqC };
-};
 
 const isOneEyed = (card) => {
   const { rank, suit } = parseCard(card);
@@ -716,13 +662,13 @@ export default function RoomPage() {
     const set = new Set();
     if (isTwoEyed(selectedCard)) {
       for (let i = 0; i < 100; i++) {
-        if (!chips.has(i) && !cornerIndex(i)) set.add(i);
+        if (!chips.has(i) && !isCornerIndex(i)) set.add(i);
       }
       return set;
     }
     if (isOneEyed(selectedCard)) {
       for (let [i, team] of chips.entries()) {
-        if (team !== mine && !cornerIndex(i) && !isLocked(i)) set.add(i);
+        if (team !== mine && !isCornerIndex(i) && !isLocked(i)) set.add(i);
       }
       return set;
     }
@@ -738,7 +684,7 @@ export default function RoomPage() {
     const positions = allowedPositionsForCard(selectedCard);
     return (
       positions.length > 0 &&
-      positions.every((i) => cornerIndex(i) || chips.has(i))
+      positions.every((i) => isCornerIndex(i) || chips.has(i))
     );
   }, [selectedCard, chips]);
 
@@ -869,7 +815,7 @@ export default function RoomPage() {
       ...prev,
       board_state: nextBoard,
       last_move: {
-        coord: coordOfIndex(targetSquare),
+        coord: indexToCoord(targetSquare),
         type: moveType,
         team: me.team,
       },
@@ -898,7 +844,7 @@ export default function RoomPage() {
           clientTurnIndex: game.turn_index,
           moveType,
           card: prevSelectedCard,
-          coord: coordOfIndex(prevTargetSquare),
+          coord: indexToCoord(prevTargetSquare),
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -949,7 +895,7 @@ export default function RoomPage() {
           clientTurnIndex: game.turn_index,
           moveType: "dead",
           card: selectedCard,
-          coord: coordOfIndex(targetSquare),
+          coord: indexToCoord(targetSquare),
         }),
       });
       const data = await res.json().catch(() => ({}));

@@ -1,23 +1,12 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import layout from "@/data/boardLayout";
 import { generateShuffledDeck, parseCard, shuffleWithSeed } from "@/lib/deck";
-import { ALL_LINES } from "@/lib/lines";
-
-function coordToIndex(coord) {
-  // coord format: "r,c" 0-based
-  const [r, c] = coord.split(",").map((n) => parseInt(n, 10));
-  return r * 10 + c;
-}
-
-function indexToCoord(idx) {
-  const r = Math.floor(idx / 10);
-  const c = idx % 10;
-  return `${r},${c}`;
-}
-
-function isCorner(idx) {
-  return idx === 0 || idx === 9 || idx === 90 || idx === 99;
-}
+import {
+  coordToIndex,
+  isCornerIndex,
+  countMaxSequences,
+  isIndexInLockedSequence,
+} from "@/lib/boardRules";
 
 function computeOccupancy(moves) {
   const occ = new Map(); // idx -> { team }
@@ -38,120 +27,6 @@ function computeOccupancy(moves) {
   return occ;
 }
 
-function countSequencesForTeam(occ, team) {
-  let count = 0;
-  for (const line of ALL_LINES) {
-    let ok = true;
-    for (const idx of line) {
-      if (isCorner(idx)) continue;
-      const o = occ.get(idx);
-      if (!o || o.team !== team) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) count++;
-  }
-  return count;
-}
-
-// Helper: list all complete lines for a team (ignoring corners)
-function completeLinesForTeam(occ, team) {
-  const lines = [];
-  for (const line of ALL_LINES) {
-    let ok = true;
-    for (const idx of line) {
-      if (isCorner(idx)) continue;
-      const o = occ.get(idx);
-      if (!o || o.team !== team) {
-        ok = false;
-        break;
-      }
-    }
-    if (ok) lines.push(line);
-  }
-  return lines;
-}
-
-function nonCornerIndices(line) {
-  const out = [];
-  for (const idx of line) {
-    if (!isCorner(idx)) out.push(idx);
-  }
-  return out;
-}
-
-// Find maximum number of valid sequences (overlap <= 1 chip)
-function countMaxSequences(occ, team) {
-  const candidates = completeLinesForTeam(occ, team);
-  if (candidates.length === 0) return 0;
-
-  let maxFound = 0;
-
-  function search(idx, usedChips, count) {
-    if (idx === candidates.length) {
-      maxFound = Math.max(maxFound, count);
-      return;
-    }
-    // Optimization: if current + remaining < maxFound, stop
-    if (count + (candidates.length - idx) <= maxFound) return;
-
-    const line = candidates[idx];
-    const nc = nonCornerIndices(line);
-
-    // Check overlap with currently selected chips
-    let overlap = 0;
-    for (const i of nc) {
-      if (usedChips.has(i)) overlap++;
-    }
-
-    // Option 1: Include this line (if valid)
-    if (overlap <= 1) {
-      const nextChips = new Set(usedChips);
-      for (const i of nc) nextChips.add(i);
-      search(idx + 1, nextChips, count + 1);
-    }
-
-    // Option 2: Skip this line
-    search(idx + 1, usedChips, count);
-  }
-
-  search(0, new Set(), 0);
-  return maxFound;
-}
-
-function isIndexInLockedSequence(occ, idx, team) {
-  // Build accepted lines under the one-common-chip rule
-  const used = new Set();
-  const accepted = [];
-  for (const line of ALL_LINES) {
-    let ok = true;
-    for (const p of line) {
-      if (isCorner(p)) continue;
-      const o = occ.get(p);
-      if (!o || o.team !== team) {
-        ok = false;
-        break;
-      }
-    }
-    if (!ok) continue;
-    let overlap = 0;
-    for (const p of line) {
-      if (isCorner(p)) continue;
-      if (used.has(p)) overlap++;
-      if (overlap > 1) break;
-    }
-    if (overlap <= 1) {
-      accepted.push(line);
-      for (const p of line) if (!isCorner(p)) used.add(p);
-    }
-  }
-  // Check if idx is in any accepted line (non-corner)
-  for (const line of accepted) {
-    if (!isCorner(idx) && line.includes(idx)) return true;
-  }
-  return false;
-}
 
 function allowedPositionsForCard(card) {
   const { rank, suit } = parseCard(card);
@@ -295,7 +170,7 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "card and coord required" });
     if (!hasCard) return res.status(400).json({ error: "Card not in hand" });
     const idx = coordToIndex(coord);
-    if (isCorner(idx))
+    if (isCornerIndex(idx))
       return res.status(400).json({ error: "Corner is immutable" });
     if (occ.has(idx)) return res.status(400).json({ error: "Square occupied" });
     if (isTwoEyedJack(card)) {
@@ -386,7 +261,7 @@ export default async function handler(req, res) {
     if (!isOneEyedJack(card))
       return res.status(400).json({ error: "Removal requires one-eyed jack" });
     const idx = coordToIndex(coord);
-    if (isCorner(idx))
+    if (isCornerIndex(idx))
       return res.status(400).json({ error: "Cannot remove corner" });
     const target = occ.get(idx);
     if (!target || target.team === player.team)
@@ -451,7 +326,8 @@ export default async function handler(req, res) {
     // Check both positions for the card are covered (dead)
     const positions = allowedPositionsForCard(card);
     const allCovered =
-      positions.length > 0 && positions.every((i) => isCorner(i) || occ.has(i));
+      positions.length > 0 &&
+      positions.every((i) => isCornerIndex(i) || occ.has(i));
     if (!allCovered) return res.status(400).json({ error: "Card is not dead" });
     const cardIndex = hand.indexOf(card);
     hand.splice(cardIndex, 1);
