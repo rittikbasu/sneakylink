@@ -56,14 +56,17 @@ export default function RoomPage() {
   const [nameError, setNameError] = useState(false);
   const deepLinkHandledRef = useRef(false);
   const roomIdRef = useRef(null);
+  const roomStatusRef = useRef(null);
   const playerIdRef = useRef(null);
   const gameRef = useRef(null);
 
   const refreshGameState = useCallback(async (reason = "resume") => {
     const roomId = roomIdRef.current;
+    const roomStatus = roomStatusRef.current;
     const pid = playerIdRef.current;
     const currentGame = gameRef.current;
     if (!roomId || !pid) return;
+    if (roomStatus === "lobby") return;
       if (syncInFlightRef.current) return;
       const now = Date.now();
       if (now - lastSyncRef.current < 1000) return;
@@ -113,6 +116,10 @@ export default function RoomPage() {
   useEffect(() => {
     roomIdRef.current = room?.id || null;
   }, [room?.id]);
+
+  useEffect(() => {
+    roomStatusRef.current = room?.status || null;
+  }, [room?.status]);
 
   useEffect(() => {
     playerIdRef.current = playerId || null;
@@ -234,23 +241,29 @@ export default function RoomPage() {
         if (!mounted) return;
         setPlayers(ps || []);
 
-        const { data: gs } = await supabase
-          .from("games")
-          .select("*")
-          .eq("room_id", roomRow.id)
-          .order("created_at", { ascending: false })
-          .limit(1);
-        const g = gs && gs.length ? gs[0] : null;
-        setGame(g);
+        if (roomRow.status !== "lobby") {
+          const { data: gs } = await supabase
+            .from("games")
+            .select("*")
+            .eq("room_id", roomRow.id)
+            .order("created_at", { ascending: false })
+            .limit(1);
+          const g = gs && gs.length ? gs[0] : null;
+          setGame(g);
 
-        if (g && playerId) {
-          const { data: handRow } = await supabase
-            .from("hands")
-            .select("cards")
-            .eq("game_id", g.id)
-            .eq("player_id", playerId)
-            .single();
-          setHand(handRow?.cards || []);
+          if (g && playerId) {
+            const { data: handRow } = await supabase
+              .from("hands")
+              .select("cards")
+              .eq("game_id", g.id)
+              .eq("player_id", playerId)
+              .single();
+            setHand(handRow?.cards || []);
+          }
+        } else {
+          setGame(null);
+          setHand([]);
+          setShowGameOver(false);
         }
       }
       setLoading(false);
@@ -271,6 +284,9 @@ export default function RoomPage() {
             setRoom(payload.new);
             if (payload.new.status === "lobby") {
               setGame(null);
+              setHand([]);
+              setSelectedCard(null);
+              setTargetSquare(null);
               setShowGameOver(false);
             }
           }
@@ -363,6 +379,7 @@ export default function RoomPage() {
     if (!game?.id || !playerId) return;
 
     const fetchGameState = async () => {
+      setHand([]);
       const { data: handRow } = await supabase
         .from("hands")
         .select("cards")
