@@ -8,7 +8,7 @@ import BoardGrid from "@/components/BoardGrid";
 import Sidebar from "@/components/Sidebar";
 import RulesModal from "@/components/RulesModal";
 import layout from "@/data/boardLayout";
-import { parseCard } from "@/lib/deck";
+import { parseCard, formatCard } from "@/lib/deck";
 import { validateRoomCode } from "@/lib/id";
 import {
   Copy,
@@ -22,6 +22,96 @@ import {
 } from "lucide-react";
 import { ALL_LINES } from "@/lib/lines";
 import { countMaxSequences } from "@/lib/sequences";
+
+const POSITIONS_BY_CARD = (() => {
+  const map = new Map();
+  for (let i = 0; i < layout.length; i++) {
+    const cell = layout[i];
+    if (cell.type !== "card") continue;
+    const key = formatCard(cell.rank, cell.suit);
+    const list = map.get(key);
+    if (list) {
+      list.push(i);
+    } else {
+      map.set(key, [i]);
+    }
+  }
+  return map;
+})();
+
+const coordOfIndex = (idx) => {
+  const r = Math.floor(idx / 10);
+  const c = idx % 10;
+  return `${r},${c}`;
+};
+
+const cornerIndex = (idx) => {
+  const r = Math.floor(idx / 10);
+  const c = idx % 10;
+  return (
+    (r === 0 && c === 0) ||
+    (r === 0 && c === 9) ||
+    (r === 9 && c === 0) ||
+    (r === 9 && c === 9)
+  );
+};
+
+const computeSequenceSets = (chips) => {
+  function nonCorner(line) {
+    return line.filter((i) => !cornerIndex(i));
+  }
+  function acceptedLines(team) {
+    const used = new Set();
+    const acc = [];
+    for (const line of ALL_LINES) {
+      let ok = true;
+      for (const idx of line) {
+        if (cornerIndex(idx)) continue;
+        if (chips.get(idx) !== team) {
+          ok = false;
+          break;
+        }
+      }
+      if (!ok) continue;
+      let overlap = 0;
+      for (const idx of nonCorner(line)) {
+        if (used.has(idx)) overlap++;
+        if (overlap > 1) break;
+      }
+      if (overlap <= 1) {
+        acc.push(line);
+        for (const idx of nonCorner(line)) used.add(idx);
+      }
+    }
+    return acc;
+  }
+  const aLines = acceptedLines("A");
+  const bLines = acceptedLines("B");
+  const cLines = acceptedLines("C");
+  const seqA = new Set();
+  const seqB = new Set();
+  const seqC = new Set();
+  for (const line of aLines) for (const i of nonCorner(line)) seqA.add(i);
+  for (const line of bLines) for (const i of nonCorner(line)) seqB.add(i);
+  for (const line of cLines) for (const i of nonCorner(line)) seqC.add(i);
+  return { seqA, seqB, seqC };
+};
+
+const isOneEyed = (card) => {
+  const { rank, suit } = parseCard(card);
+  return rank === "J" && (suit === "spade" || suit === "heart");
+};
+
+const isTwoEyed = (card) => {
+  const { rank, suit } = parseCard(card);
+  return rank === "J" && (suit === "club" || suit === "diamond");
+};
+
+const allowedPositionsForCard = (card) => {
+  const { rank } = parseCard(card);
+  if (rank === "J") return [];
+  return POSITIONS_BY_CARD.get(card) ?? [];
+};
 
 export default function RoomPage() {
   const router = useRouter();
@@ -601,14 +691,9 @@ export default function RoomPage() {
 
   const myTurn =
     game && me && game.current_team === me.team && room?.status === "active";
+  const currentRoomId = room?.id;
 
-  function coordOfIndex(idx) {
-    const r = Math.floor(idx / 10);
-    const c = idx % 10;
-    return `${r},${c}`;
-  }
-
-  function computeChips() {
+  const chips = useMemo(() => {
     const m = new Map();
     if (game?.board_state) {
       for (const [k, v] of Object.entries(game.board_state)) {
@@ -616,85 +701,15 @@ export default function RoomPage() {
       }
     }
     return m;
-  }
+  }, [game?.board_state]);
 
-  function cornerIndex(idx) {
-    const r = Math.floor(idx / 10);
-    const c = idx % 10;
-    return (
-      (r === 0 && c === 0) ||
-      (r === 0 && c === 9) ||
-      (r === 9 && c === 0) ||
-      (r === 9 && c === 9)
-    );
-  }
+  const { seqA, seqB, seqC } = useMemo(
+    () => computeSequenceSets(chips),
+    [chips]
+  );
 
-  function computeSequenceSets(chips) {
-    function nonCorner(line) {
-      return line.filter((i) => !cornerIndex(i));
-    }
-    function acceptedLines(team) {
-      const used = new Set();
-      const acc = [];
-      for (const line of ALL_LINES) {
-        let ok = true;
-        for (const idx of line) {
-          if (cornerIndex(idx)) continue;
-          if (chips.get(idx) !== team) {
-            ok = false;
-            break;
-          }
-        }
-        if (!ok) continue;
-        let overlap = 0;
-        for (const idx of nonCorner(line)) {
-          if (used.has(idx)) overlap++;
-          if (overlap > 1) break;
-        }
-        if (overlap <= 1) {
-          acc.push(line);
-          for (const idx of nonCorner(line)) used.add(idx);
-        }
-      }
-      return acc;
-    }
-    const aLines = acceptedLines("A");
-    const bLines = acceptedLines("B");
-    const cLines = acceptedLines("C");
-    const seqA = new Set();
-    const seqB = new Set();
-    const seqC = new Set();
-    for (const line of aLines) for (const i of nonCorner(line)) seqA.add(i);
-    for (const line of bLines) for (const i of nonCorner(line)) seqB.add(i);
-    for (const line of cLines) for (const i of nonCorner(line)) seqC.add(i);
-    return { seqA, seqB, seqC };
-  }
-
-  function isOneEyed(card) {
-    const { rank, suit } = parseCard(card);
-    return rank === "J" && (suit === "spade" || suit === "heart");
-  }
-  function isTwoEyed(card) {
-    const { rank, suit } = parseCard(card);
-    return rank === "J" && (suit === "club" || suit === "diamond");
-  }
-
-  function allowedPositionsForCard(card) {
-    const { rank, suit } = parseCard(card);
-    if (rank === "J") return [];
-    const positions = [];
-    for (let i = 0; i < layout.length; i++) {
-      const cell = layout[i];
-      if (cell.type === "card" && cell.rank === rank && cell.suit === suit)
-        positions.push(i);
-    }
-    return positions;
-  }
-
-  function allowedIndicesForSelectedCard() {
-    if (!selectedCard) return new Set();
-    const chips = computeChips();
-    const { seqA, seqB, seqC } = computeSequenceSets(chips);
+  const allowed = useMemo(() => {
+    if (!selectedCard) return null;
     const isLocked = (idx) => seqA.has(idx) || seqB.has(idx) || seqC.has(idx);
 
     const mine = me?.team;
@@ -716,26 +731,16 @@ export default function RoomPage() {
       if (!chips.has(i)) set.add(i);
     }
     return set;
-  }
+  }, [selectedCard, chips, me?.team, seqA, seqB, seqC]);
 
-  function isCardDead(card) {
-    if (!card) return false;
-    const chips = computeChips();
-    const positions = allowedPositionsForCard(card);
+  const isSelectedCardDead = useMemo(() => {
+    if (!selectedCard) return false;
+    const positions = allowedPositionsForCard(selectedCard);
     return (
       positions.length > 0 &&
-      positions.every((i) => {
-        const r = Math.floor(i / 10);
-        const c = i % 10;
-        const isCorner =
-          (r === 0 && c === 0) ||
-          (r === 0 && c === 9) ||
-          (r === 9 && c === 0) ||
-          (r === 9 && c === 9);
-        return isCorner || chips.has(i);
-      })
+      positions.every((i) => cornerIndex(i) || chips.has(i))
     );
-  }
+  }, [selectedCard, chips]);
 
   const groupedPlayers = useMemo(
     () => ({
@@ -766,20 +771,84 @@ export default function RoomPage() {
     return pbt;
   }, [groupedPlayers]);
 
-  function onSquareClick(idx) {
-    const turnPlayer =
-      playersByTurnSafe.length && game
-        ? playersByTurnSafe[game.turn_index % playersByTurnSafe.length]
-        : null;
+  const sidebarTeams = useMemo(() => {
+    if (!game) return null;
+    const hostId = room?.host_player_id;
+    const buildTeam = (team) =>
+      players
+        .filter((p) => p.team === team)
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          isYou: p.id === playerId,
+          isHost: p.id === hostId,
+        }));
+    const teams = {
+      A: buildTeam("A"),
+      B: buildTeam("B"),
+      C: [],
+    };
+    if ((room?.settings?.teams ?? 2) === 3) {
+      teams.C = buildTeam("C");
+    }
+    return teams;
+  }, [game, players, playerId, room?.host_player_id, room?.settings?.teams]);
 
+  const sidebarScores = useMemo(() => {
+    if (!game) return null;
+    const occ = new Map();
+    for (const [i, t] of chips.entries()) {
+      occ.set(i, { team: t });
+    }
+    const scores = {
+      A: countMaxSequences(occ, "A"),
+      B: countMaxSequences(occ, "B"),
+    };
+    if ((room?.settings?.teams ?? 2) === 3) {
+      scores.C = countMaxSequences(occ, "C");
+    }
+    return scores;
+  }, [game, chips, room?.settings?.teams]);
+
+  const turnPlayer = useMemo(() => {
+    if (!playersByTurnSafe.length || !game) return null;
+    return playersByTurnSafe[game.turn_index % playersByTurnSafe.length];
+  }, [playersByTurnSafe, game]);
+
+  const onSquareClick = useCallback((idx) => {
     if (!myTurn || !selectedCard || posting || turnPlayer?.id !== me?.id)
       return;
-    const allowed = allowedIndicesForSelectedCard();
-    if (!allowed.has(idx)) return;
+    if (!allowed || !allowed.has(idx)) return;
     setTargetSquare(idx);
-  }
+  }, [allowed, me?.id, myTurn, posting, selectedCard, turnPlayer]);
 
-  async function onConfirmMove() {
+  const teamColor =
+    (turnPlayer?.team === "A"
+      ? "text-emerald-500"
+      : turnPlayer?.team === "B"
+      ? "text-sky-500"
+      : "text-rose-500") || "text-emerald-500";
+  const myTeamColor =
+    me?.team === "A" ? "emerald" : me?.team === "B" ? "sky" : "rose";
+  const isMyTurn =
+    game &&
+    me &&
+    turnPlayer &&
+    turnPlayer.id === me.id &&
+    room?.status === "active";
+  const canConfirm =
+    selectedCard &&
+    targetSquare != null &&
+    isMyTurn &&
+    allowed?.has(targetSquare);
+  const canDead =
+    selectedCard &&
+    isSelectedCardDead &&
+    isMyTurn &&
+    !posting &&
+    targetSquare == null;
+
+  const onConfirmMove = useCallback(async () => {
     if (!myTurn || !selectedCard || targetSquare == null || posting) return;
     const moveType = isOneEyed(selectedCard) ? "remove" : "place";
 
@@ -823,7 +892,7 @@ export default function RoomPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          roomId: room.id,
+          roomId: currentRoomId,
           gameId: game.id,
           playerId,
           clientTurnIndex: game.turn_index,
@@ -843,9 +912,19 @@ export default function RoomPage() {
     } finally {
       setPosting(false);
     }
-  }
+  }, [
+    game,
+    hand,
+    myTurn,
+    playerId,
+    players,
+    posting,
+    currentRoomId,
+    selectedCard,
+    targetSquare,
+  ]);
 
-  async function onDead() {
+  const onDead = useCallback(async () => {
     if (!myTurn || !selectedCard || posting) return;
     const prevHand = [...hand];
     const prevSelectedCard = selectedCard;
@@ -864,7 +943,7 @@ export default function RoomPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          roomId: room.id,
+          roomId: currentRoomId,
           gameId: game.id,
           playerId,
           clientTurnIndex: game.turn_index,
@@ -883,7 +962,54 @@ export default function RoomPage() {
     } finally {
       setPosting(false);
     }
-  }
+  }, [
+    game,
+    hand,
+    myTurn,
+    playerId,
+    posting,
+    currentRoomId,
+    selectedCard,
+    targetSquare,
+  ]);
+
+  const handleCardSelect = useCallback(
+    (card) => {
+      setSelectedCard(card === selectedCard ? null : card);
+      setTargetSquare(null);
+    },
+    [selectedCard]
+  );
+
+  const footerProps = useMemo(
+    () => ({
+      hand,
+      selectedCard,
+      onCardSelect: handleCardSelect,
+      onConfirmMove,
+      onDeadCard: onDead,
+      canConfirm,
+      canDead,
+      turnUsername: turnPlayer?.name || `Team ${game?.current_team}`,
+      teamColorClass: teamColor,
+      myTeamColor,
+      myTurn: isMyTurn,
+    }),
+    [
+      canConfirm,
+      canDead,
+      game?.current_team,
+      handleCardSelect,
+      hand,
+      isMyTurn,
+      myTeamColor,
+      onConfirmMove,
+      onDead,
+      selectedCard,
+      teamColor,
+      turnPlayer?.name,
+    ]
+  );
 
   const startGame = async () => {
     if (!room || !playerId) return;
@@ -1500,93 +1626,7 @@ export default function RoomPage() {
       );
     }
 
-    const chips = computeChips();
-    const { seqA, seqB, seqC } = computeSequenceSets(chips);
     const grouped = groupedPlayers;
-    const playersByTurn = playersByTurnSafe;
-    const turnPlayer =
-      playersByTurn.length && game
-        ? playersByTurn[game.turn_index % playersByTurn.length]
-        : null;
-    const teamColor =
-      (turnPlayer?.team === "A"
-        ? "text-emerald-500"
-        : turnPlayer?.team === "B"
-        ? "text-sky-500"
-        : "text-rose-500") || "text-emerald-500";
-    const myTeamColor =
-      me?.team === "A" ? "emerald" : me?.team === "B" ? "sky" : "rose";
-    const allowed = selectedCard ? allowedIndicesForSelectedCard() : null;
-    const myTurn =
-      game &&
-      me &&
-      turnPlayer &&
-      turnPlayer.id === me.id &&
-      room?.status === "active";
-    const canConfirm =
-      selectedCard &&
-      targetSquare != null &&
-      myTurn &&
-      allowed?.has(targetSquare);
-    const canDead =
-      selectedCard &&
-      isCardDead(selectedCard) &&
-      myTurn &&
-      !posting &&
-      targetSquare == null;
-
-    const sidebarTeams = game
-      ? {
-          A: players
-            .filter((p) => p.team === "A")
-            .map((p) => ({
-              id: p.id,
-              name: p.name,
-              isYou: p.id === playerId,
-              isHost: p.id === room.host_player_id,
-            })),
-          B: players
-            .filter((p) => p.team === "B")
-            .map((p) => ({
-              id: p.id,
-              name: p.name,
-              isYou: p.id === playerId,
-              isHost: p.id === room.host_player_id,
-            })),
-          C:
-            (room?.settings?.teams ?? 2) === 3
-              ? players
-                  .filter((p) => p.team === "C")
-                  .map((p) => ({
-                    id: p.id,
-                    name: p.name,
-                    isYou: p.id === playerId,
-                    isHost: p.id === room.host_player_id,
-                  }))
-              : [],
-        }
-      : null;
-
-    const calculateSequenceCount = (team) => {
-      const occ = new Map();
-      for (const [i, t] of chips.entries()) {
-        occ.set(i, { team: t });
-      }
-      return countMaxSequences(occ, team);
-    };
-
-    const sidebarScores = game
-      ? (room?.settings?.teams ?? 2) === 3
-        ? {
-            A: calculateSequenceCount("A"),
-            B: calculateSequenceCount("B"),
-            C: calculateSequenceCount("C"),
-          }
-        : {
-            A: calculateSequenceCount("A"),
-            B: calculateSequenceCount("B"),
-          }
-      : null;
 
     const winner = game?.winner_team;
     const isWinner = me?.team === winner;
@@ -1611,23 +1651,6 @@ export default function RoomPage() {
       },
       onEndGame: !game?.finished_at ? handleEndGame : undefined,
       winSequences: room?.settings?.win_sequences ?? 2,
-    };
-
-    const footerProps = {
-      hand,
-      selectedCard,
-      onCardSelect: (c) => {
-        setSelectedCard(c === selectedCard ? null : c);
-        setTargetSquare(null);
-      },
-      onConfirmMove,
-      onDeadCard: onDead,
-      canConfirm,
-      canDead,
-      turnUsername: turnPlayer?.name || `Team ${game?.current_team}`,
-      teamColorClass: teamColor,
-      myTeamColor,
-      myTurn,
     };
 
     const gameOverControls = (
