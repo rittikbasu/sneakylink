@@ -10,6 +10,7 @@ import RulesModal from "@/components/RulesModal";
 import layout from "@/data/boardLayout";
 import { parseCard, formatCard } from "@/lib/deck";
 import { useResumeSync } from "@/features/room/hooks/useResumeSync";
+import { useGameData } from "@/features/room/hooks/useGameData";
 import { useMoveActions } from "@/features/room/hooks/useMoveActions";
 import {
   buildPlayersByTurn,
@@ -18,10 +19,6 @@ import {
   getTurnPlayer,
   groupPlayersByTeam,
 } from "@/features/room/selectors/roomSelectors";
-import {
-  computeSequenceSets,
-  isCornerIndex,
-} from "@/lib/boardRules";
 import { validateRoomCode } from "@/lib/id";
 import {
   Copy,
@@ -76,20 +73,10 @@ export default function RoomPage() {
   const [players, setPlayers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
-  const [game, setGame] = useState(null);
-  const [hand, setHand] = useState([]);
-  const [selectedCard, setSelectedCard] = useState(null);
-  const [targetSquare, setTargetSquare] = useState(null);
-  const [glowData, setGlowData] = useState(null);
-  const glowTimeoutRef = useRef(null);
-  const lastMoveRef = useRef(null);
-  const lastGlowTurnRef = useRef(null);
   const [posting, setPosting] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const wakeLockRef = useRef(null);
-  const lastSyncRef = useRef(0);
-  const syncInFlightRef = useRef(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [askNameOpen, setAskNameOpen] = useState(false);
@@ -98,79 +85,39 @@ export default function RoomPage() {
   const [nameSubmitting, setNameSubmitting] = useState(false);
   const [nameError, setNameError] = useState(false);
   const deepLinkHandledRef = useRef(false);
-  const roomIdRef = useRef(null);
-  const roomStatusRef = useRef(null);
-  const playerIdRef = useRef(null);
-  const gameRef = useRef(null);
 
-  const refreshGameState = useCallback(async (reason = "resume") => {
-    const roomId = roomIdRef.current;
-    const roomStatus = roomStatusRef.current;
-    const pid = playerIdRef.current;
-    const currentGame = gameRef.current;
-    if (!roomId || !pid) return;
-    if (roomStatus === "lobby") return;
-      if (syncInFlightRef.current) return;
-      const now = Date.now();
-      if (now - lastSyncRef.current < 1000) return;
-      syncInFlightRef.current = true;
-      lastSyncRef.current = now;
-
-      try {
-        const { data: gs } = await supabase
-          .from("games")
-          .select(
-            "id, room_id, turn_index, current_team, board_state, last_move, finished_at, winner_team, created_at"
-          )
-          .eq("room_id", roomId)
-          .order("created_at", { ascending: false })
-          .limit(1);
-        const g = gs && gs.length ? gs[0] : null;
-        if (!g) return;
-
-        const needsHandRefresh =
-          !currentGame ||
-          currentGame.id !== g.id ||
-          currentGame.turn_index !== g.turn_index;
-
-        setGame((prev) => {
-          if (!prev || g.created_at >= prev.created_at) return g;
-          return prev;
-        });
-
-        if (needsHandRefresh) {
-          const { data: handRow } = await supabase
-            .from("hands")
-            .select("cards")
-            .eq("game_id", g.id)
-            .eq("player_id", pid)
-            .single();
-          setHand(handRow?.cards || []);
-        }
-      } catch {
-        // Best-effort; realtime will eventually reconcile.
-      } finally {
-        syncInFlightRef.current = false;
-      }
-    },
-    []
+  const isHost = room && playerId && room.host_player_id === playerId;
+  const me = useMemo(
+    () => players.find((p) => p.id === playerId) || null,
+    [players, playerId]
   );
 
-  useEffect(() => {
-    roomIdRef.current = room?.id || null;
-  }, [room?.id]);
-
-  useEffect(() => {
-    roomStatusRef.current = room?.status || null;
-  }, [room?.status]);
-
-  useEffect(() => {
-    playerIdRef.current = playerId || null;
-  }, [playerId]);
-
-  useEffect(() => {
-    gameRef.current = game || null;
-  }, [game]);
+  const {
+    game,
+    setGame,
+    hand,
+    setHand,
+    selectedCard,
+    setSelectedCard,
+    targetSquare,
+    setTargetSquare,
+    glowData,
+    highlight,
+    chips,
+    seqA,
+    seqB,
+    seqC,
+    allowed,
+    isSelectedCardDead,
+    refreshGameState,
+  } = useGameData({
+    room,
+    playerId,
+    meTeam: me?.team,
+    isOneEyed,
+    isTwoEyed,
+    allowedPositionsForCard,
+  });
 
   useEffect(() => {
     if (!code) return;
@@ -417,50 +364,6 @@ export default function RoomPage() {
     };
   }, [room?.id]);
 
-  // 3. Game-Specific Subscription: Hands & Moves (Depends on Game ID)
-  useEffect(() => {
-    if (!game?.id || !playerId) return;
-
-    const fetchGameState = async () => {
-      setHand([]);
-      const { data: handRow } = await supabase
-        .from("hands")
-        .select("cards")
-        .eq("game_id", game.id)
-        .eq("player_id", playerId)
-        .single();
-      setHand(handRow?.cards || []);
-    };
-
-    fetchGameState();
-
-    const channel = supabase
-      .channel(`game:${game.id}:${playerId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "hands",
-          filter: `game_id=eq.${game.id}`,
-        },
-        (payload) => {
-          if (payload.new && payload.new.player_id === playerId) {
-            setHand(payload.new.cards || []);
-          }
-        }
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          refreshGameState("game-subscribe");
-        }
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [game?.id, playerId]);
-
   // Screen Wake Lock - keep screen on during game (best effort)
   useEffect(() => {
     if (!room?.id) return;
@@ -542,74 +445,6 @@ export default function RoomPage() {
     onResume: refreshGameState,
   });
 
-  const isHost = room && playerId && room.host_player_id === playerId;
-  const me = useMemo(
-    () => players.find((p) => p.id === playerId) || null,
-    [players, playerId]
-  );
-  const highlight = useMemo(() => {
-    if (targetSquare == null) return new Set();
-    const s = new Set();
-    s.add(targetSquare);
-    return s;
-  }, [targetSquare]);
-
-  useEffect(() => {
-    const lm = game?.last_move;
-    const currentTurn = game?.turn_index ?? null;
-
-    if (!lm || lm.type !== "place" || !lm.coord) {
-      lastMoveRef.current = lm || null;
-      if (currentTurn != null) lastGlowTurnRef.current = currentTurn;
-      if (glowTimeoutRef.current) {
-        clearTimeout(glowTimeoutRef.current);
-        glowTimeoutRef.current = null;
-      }
-      setGlowData(null);
-      return;
-    }
-
-    if (lastGlowTurnRef.current == null) {
-      lastGlowTurnRef.current = currentTurn;
-      lastMoveRef.current = lm;
-      return;
-    }
-
-    if (currentTurn === lastGlowTurnRef.current) {
-      lastMoveRef.current = lm;
-      return;
-    }
-
-    lastGlowTurnRef.current = currentTurn;
-    lastMoveRef.current = lm;
-
-    if (game?.finished_at) {
-      if (glowTimeoutRef.current) {
-        clearTimeout(glowTimeoutRef.current);
-        glowTimeoutRef.current = null;
-      }
-      setGlowData(null);
-      return;
-    }
-
-    const [r, c] = lm.coord.split(",").map((n) => parseInt(n, 10));
-    setGlowData({ idx: r * 10 + c, team: lm.team });
-
-    if (glowTimeoutRef.current) clearTimeout(glowTimeoutRef.current);
-    glowTimeoutRef.current = setTimeout(() => {
-      setGlowData(null);
-      glowTimeoutRef.current = null;
-    }, 5000);
-  }, [game?.last_move, game?.finished_at, game?.turn_index]);
-
-  useEffect(() => {
-    return () => {
-      if (glowTimeoutRef.current) {
-        clearTimeout(glowTimeoutRef.current);
-      }
-    };
-  }, []);
-
   useEffect(() => {
     if (game?.finished_at) {
       setShowGameOver(true);
@@ -623,55 +458,6 @@ export default function RoomPage() {
   const myTurn =
     game && me && game.current_team === me.team && room?.status === "active";
   const currentRoomId = room?.id;
-
-  const chips = useMemo(() => {
-    const m = new Map();
-    if (game?.board_state) {
-      for (const [k, v] of Object.entries(game.board_state)) {
-        m.set(parseInt(k, 10), v.team);
-      }
-    }
-    return m;
-  }, [game?.board_state]);
-
-  const { seqA, seqB, seqC } = useMemo(
-    () => computeSequenceSets(chips),
-    [chips]
-  );
-
-  const allowed = useMemo(() => {
-    if (!selectedCard) return null;
-    const isLocked = (idx) => seqA.has(idx) || seqB.has(idx) || seqC.has(idx);
-
-    const mine = me?.team;
-    const set = new Set();
-    if (isTwoEyed(selectedCard)) {
-      for (let i = 0; i < 100; i++) {
-        if (!chips.has(i) && !isCornerIndex(i)) set.add(i);
-      }
-      return set;
-    }
-    if (isOneEyed(selectedCard)) {
-      for (let [i, team] of chips.entries()) {
-        if (team !== mine && !isCornerIndex(i) && !isLocked(i)) set.add(i);
-      }
-      return set;
-    }
-    const positions = allowedPositionsForCard(selectedCard);
-    for (const i of positions) {
-      if (!chips.has(i)) set.add(i);
-    }
-    return set;
-  }, [selectedCard, chips, me?.team, seqA, seqB, seqC]);
-
-  const isSelectedCardDead = useMemo(() => {
-    if (!selectedCard) return false;
-    const positions = allowedPositionsForCard(selectedCard);
-    return (
-      positions.length > 0 &&
-      positions.every((i) => isCornerIndex(i) || chips.has(i))
-    );
-  }, [selectedCard, chips]);
 
   const groupedPlayers = useMemo(
     () => groupPlayersByTeam(players),
