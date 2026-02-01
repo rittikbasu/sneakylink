@@ -9,6 +9,14 @@ import Sidebar from "@/components/Sidebar";
 import RulesModal from "@/components/RulesModal";
 import layout from "@/data/boardLayout";
 import { parseCard, formatCard } from "@/lib/deck";
+import { useResumeSync } from "@/features/room/hooks/useResumeSync";
+import {
+  buildPlayersByTurn,
+  buildSidebarScores,
+  buildSidebarTeams,
+  getTurnPlayer,
+  groupPlayersByTeam,
+} from "@/features/room/selectors/roomSelectors";
 import {
   computeSequenceSets,
   indexToCoord,
@@ -25,7 +33,6 @@ import {
   Play,
   Share2,
 } from "lucide-react";
-import { countMaxSequences } from "@/lib/sequences";
 
 const POSITIONS_BY_CARD = (() => {
   const map = new Map();
@@ -529,33 +536,11 @@ export default function RoomPage() {
     };
   }, [room?.id]);
 
-  useEffect(() => {
-    if (!room?.id || !playerId) return;
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        refreshGameState("visibility");
-      }
-    };
-    const handleFocus = () => {
-      if (document.visibilityState === "visible") {
-        refreshGameState("focus");
-      }
-    };
-    const handleOnline = () => {
-      refreshGameState("online");
-    };
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("focus", handleFocus);
-    window.addEventListener("online", handleOnline);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("focus", handleFocus);
-      window.removeEventListener("online", handleOnline);
-    };
-  }, [room?.id, playerId, refreshGameState]);
+  useResumeSync({
+    roomId: room?.id,
+    playerId,
+    onResume: refreshGameState,
+  });
 
   const isHost = room && playerId && room.host_player_id === playerId;
   const me = useMemo(
@@ -689,77 +674,41 @@ export default function RoomPage() {
   }, [selectedCard, chips]);
 
   const groupedPlayers = useMemo(
-    () => ({
-      A: [...players]
-        .filter((p) => p.team === "A")
-        .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
-      B: [...players]
-        .filter((p) => p.team === "B")
-        .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
-      C: [...players]
-        .filter((p) => p.team === "C")
-        .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0)),
-    }),
+    () => groupPlayersByTeam(players),
     [players]
   );
 
-  const playersByTurnSafe = useMemo(() => {
-    const teamOrder = ["A", "B", "C"].filter(
-      (t) => groupedPlayers[t].length > 0
-    );
-    const maxLen = Math.max(...teamOrder.map((t) => groupedPlayers[t].length));
-    const pbt = [];
-    for (let i = 0; i < maxLen; i++) {
-      for (const t of teamOrder) {
-        if (groupedPlayers[t][i]) pbt.push(groupedPlayers[t][i]);
-      }
-    }
-    return pbt;
-  }, [groupedPlayers]);
+  const playersByTurnSafe = useMemo(
+    () => buildPlayersByTurn(groupedPlayers),
+    [groupedPlayers]
+  );
 
-  const sidebarTeams = useMemo(() => {
-    if (!game) return null;
-    const hostId = room?.host_player_id;
-    const buildTeam = (team) =>
-      players
-        .filter((p) => p.team === team)
-        .map((p) => ({
-          id: p.id,
-          name: p.name,
-          isYou: p.id === playerId,
-          isHost: p.id === hostId,
-        }));
-    const teams = {
-      A: buildTeam("A"),
-      B: buildTeam("B"),
-      C: [],
-    };
-    if ((room?.settings?.teams ?? 2) === 3) {
-      teams.C = buildTeam("C");
-    }
-    return teams;
-  }, [game, players, playerId, room?.host_player_id, room?.settings?.teams]);
+  const sidebarTeams = useMemo(
+    () =>
+      buildSidebarTeams({
+        game,
+        players,
+        playerId,
+        hostId: room?.host_player_id,
+        teamsSetting: room?.settings?.teams ?? 2,
+      }),
+    [game, players, playerId, room?.host_player_id, room?.settings?.teams]
+  );
 
-  const sidebarScores = useMemo(() => {
-    if (!game) return null;
-    const occ = new Map();
-    for (const [i, t] of chips.entries()) {
-      occ.set(i, { team: t });
-    }
-    const scores = {
-      A: countMaxSequences(occ, "A"),
-      B: countMaxSequences(occ, "B"),
-    };
-    if ((room?.settings?.teams ?? 2) === 3) {
-      scores.C = countMaxSequences(occ, "C");
-    }
-    return scores;
-  }, [game, chips, room?.settings?.teams]);
+  const sidebarScores = useMemo(
+    () =>
+      buildSidebarScores({
+        game,
+        chips,
+        teamsSetting: room?.settings?.teams ?? 2,
+      }),
+    [game, chips, room?.settings?.teams]
+  );
 
-  const turnPlayer = useMemo(() => {
-    if (!playersByTurnSafe.length || !game) return null;
-    return playersByTurnSafe[game.turn_index % playersByTurnSafe.length];
-  }, [playersByTurnSafe, game]);
+  const turnPlayer = useMemo(
+    () => getTurnPlayer(playersByTurnSafe, game),
+    [playersByTurnSafe, game]
+  );
 
   const onSquareClick = useCallback((idx) => {
     if (!myTurn || !selectedCard || posting || turnPlayer?.id !== me?.id)
