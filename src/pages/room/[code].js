@@ -118,6 +118,8 @@ export default function RoomPage() {
     handleEndGame,
     handlePlayAgain,
     dismissKickedNotice,
+    leaveRoom,
+    endRoom,
     kickPlayer,
     refreshRoomState,
   } = useRoomData({
@@ -453,6 +455,37 @@ export default function RoomPage() {
           <div className="text-red-400 text-sm">Room not found</div>
         </div>
       );
+    if (
+      room.status === "finished" &&
+      room.settings?.ended_by_host &&
+      !game?.finished_at
+    ) {
+      return (
+        <div className="min-h-dvh grid place-items-center px-4">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_70%,black_100%)] p-6 text-center shadow-xl">
+            <div className="text-lg font-semibold text-white mb-2">
+              This lobby was ended by the host
+            </div>
+            <div className="text-sm text-zinc-500 mb-5">
+              The room is now closed.
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                try {
+                  localStorage.removeItem(`seq_pid:${room.code}`);
+                } catch {}
+                setPlayerId(null);
+                router.push("/");
+              }}
+              className="w-full py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-semibold"
+            >
+              Back to Home
+            </button>
+          </div>
+        </div>
+      );
+    }
     if (room.status === "lobby") {
       return (
         <LobbyView
@@ -470,6 +503,8 @@ export default function RoomPage() {
           onStartGame={startGame}
           starting={starting}
           onKickPlayer={kickPlayer}
+          onLeaveRoom={leaveRoom}
+          onEndRoom={endRoom}
         />
       );
     }

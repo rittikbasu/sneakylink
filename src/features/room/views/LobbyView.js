@@ -1,5 +1,14 @@
 import { useState } from "react";
-import { Copy, Users, Check, Settings, Share2, X } from "lucide-react";
+import {
+  Copy,
+  Users,
+  Check,
+  Settings,
+  Share2,
+  X,
+  LogOut,
+  Ban,
+} from "lucide-react";
 
 export default function LobbyView({
   room,
@@ -16,6 +25,8 @@ export default function LobbyView({
   onStartGame,
   starting,
   onKickPlayer,
+  onLeaveRoom,
+  onEndRoom,
 }) {
   const numTeams = room.settings?.teams ?? 2;
   const aPlayers = players.filter((p) => p.team === "A");
@@ -30,6 +41,8 @@ export default function LobbyView({
   const canShare = typeof navigator !== "undefined" && !!navigator.share;
   const [kickTarget, setKickTarget] = useState(null);
   const [kicking, setKicking] = useState(false);
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   const confirmKick = async () => {
     if (!kickTarget || !onKickPlayer) return;
@@ -39,13 +52,46 @@ export default function LobbyView({
     if (ok) setKickTarget(null);
   };
 
+  const confirmLeave = async () => {
+    if (leaving) return;
+    setLeaving(true);
+    const action = isHost ? onEndRoom : onLeaveRoom;
+    const ok = action ? await action() : false;
+    setLeaving(false);
+    if (ok) setLeaveOpen(false);
+  };
+
   return (
     <div className="h-dvh overflow-y-auto text-white px-4 py-6">
-      <div className="max-w-2xl lg:max-w-lg mx-auto">
-        <div className="mb-6">
-          <h1 className="text-2xl font-semibold mb-1 bg-linear-to-b from-white/90 via-blue-200 to-blue-500 bg-clip-text text-transparent">
+      <div className="max-w-lg mx-auto w-full">
+        <div className="mb-6 flex items-center justify-between gap-4">
+          <h1 className="text-2xl md:text-3xl font-semibold bg-linear-to-b from-white/90 via-blue-200 to-blue-500 bg-clip-text text-transparent">
             SneakyLink
           </h1>
+          <button
+            type="button"
+            onClick={() => {
+              setLeaveOpen(true);
+              if (kickTarget) setKickTarget(null);
+            }}
+            className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2 ${
+              isHost
+                ? "bg-red-600/80 hover:bg-red-500 text-white"
+                : "bg-zinc-800 hover:bg-zinc-700 text-white"
+            }`}
+          >
+            {isHost ? (
+              <>
+                <Ban className="w-4 h-4" />
+                <span>End Game</span>
+              </>
+            ) : (
+              <>
+                <LogOut className="w-4 h-4" />
+                <span>Leave Game</span>
+              </>
+            )}
+          </button>
         </div>
 
         <div className="space-y-4">
@@ -479,6 +525,51 @@ export default function LobbyView({
                 disabled={kicking}
               >
                 {kicking ? "Kicking..." : "Kick"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+      {leaveOpen && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" />
+          <div className="fixed left-1/2 top-1/2 z-50 w-[90vw] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_70%,black_100%)] p-5 shadow-xl">
+            <div className="mb-4">
+              <div className="text-lg font-semibold text-white">
+                {isHost ? "End this lobby?" : "Leave this lobby?"}
+              </div>
+              <div className="text-sm text-zinc-500">
+                {isHost
+                  ? "This will remove everyone and close the room."
+                  : "You will be removed from this room."}
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setLeaveOpen(false)}
+                className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-semibold"
+                disabled={leaving}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmLeave}
+                className={`flex-1 py-2.5 rounded-xl text-white font-semibold disabled:bg-zinc-800 disabled:text-zinc-600 ${
+                  isHost
+                    ? "bg-red-600 hover:bg-red-500"
+                    : "bg-blue-600 hover:bg-blue-500"
+                }`}
+                disabled={leaving}
+              >
+                {leaving
+                  ? isHost
+                    ? "Ending..."
+                    : "Leaving..."
+                  : isHost
+                  ? "End Lobby"
+                  : "Leave"}
               </button>
             </div>
           </div>

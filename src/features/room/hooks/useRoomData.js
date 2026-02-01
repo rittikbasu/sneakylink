@@ -447,6 +447,71 @@ export const useRoomData = ({
     } catch {}
   }, [playerId, room]);
 
+  const leaveRoom = useCallback(async () => {
+    if (!room || !playerId) return false;
+    if (room.host_player_id === playerId) return false;
+    if (room.status !== "lobby") {
+      alert("You can only leave while in the lobby.");
+      return false;
+    }
+
+    try {
+      const res = await fetch("/api/leave-room", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: room.id, playerId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Failed to leave room");
+        return false;
+      }
+      try {
+        localStorage.removeItem(`seq_pid:${code}`);
+      } catch {}
+      setPlayers((prev) => prev.filter((p) => p.id !== playerId));
+      setPlayerId(null);
+      router.push("/");
+      return true;
+    } catch {
+      alert("Failed to leave room");
+      return false;
+    }
+  }, [code, playerId, room, router, setPlayerId, setPlayers]);
+
+  const endRoom = useCallback(async () => {
+    if (!room || !playerId) return false;
+    if (room.host_player_id !== playerId) return false;
+    if (room.status !== "lobby") {
+      alert("You can only end the room while in the lobby.");
+      return false;
+    }
+
+    try {
+      const res = await fetch("/api/end-room", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roomId: room.id, playerId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Failed to end room");
+        return false;
+      }
+      try {
+        localStorage.removeItem(`seq_pid:${code}`);
+      } catch {}
+      setPlayers([]);
+      setRoom(null);
+      setPlayerId(null);
+      router.push("/");
+      return true;
+    } catch {
+      alert("Failed to end room");
+      return false;
+    }
+  }, [code, playerId, room, router, setPlayerId, setPlayers, setRoom]);
+
   const dismissKickedNotice = useCallback(() => {
     setKickedNotice(false);
   }, []);
@@ -518,6 +583,8 @@ export const useRoomData = ({
     handleEndGame,
     handlePlayAgain,
     dismissKickedNotice,
+    leaveRoom,
+    endRoom,
     kickPlayer,
     refreshRoomState,
   };
