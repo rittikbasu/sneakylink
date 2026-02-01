@@ -26,7 +26,29 @@ export const useRoomData = ({
   const [tempName, setTempName] = useState("");
   const [nameSubmitting, setNameSubmitting] = useState(false);
   const [nameError, setNameError] = useState(false);
+  const [kickedNotice, setKickedNotice] = useState(false);
   const deepLinkHandledRef = useRef(false);
+
+  const refreshRoomState = useCallback(async (reason = "resume") => {
+    if (!code) return;
+    if (!validateRoomCode(code)) return;
+
+    const { data: roomRow } = await supabase
+      .from("rooms")
+      .select("*")
+      .eq("code", code)
+      .single();
+    setRoom(roomRow || null);
+
+    if (roomRow) {
+      const { data: ps } = await supabase
+        .from("players")
+        .select("*")
+        .eq("room_id", roomRow.id)
+        .order("seat_index", { ascending: true });
+      setPlayers(ps || []);
+    }
+  }, [code, setPlayers, setRoom]);
 
   useEffect(() => {
     if (!code) return;
@@ -104,6 +126,7 @@ export const useRoomData = ({
         localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
       } catch {}
       setAskNameOpen(false);
+      setKickedNotice(false);
       setPlayerId(data.player_id);
     } catch {
       alert("Failed to join");
@@ -329,6 +352,7 @@ export const useRoomData = ({
       if (!room || !playerId || room.host_player_id !== playerId) return;
 
       const prevRoom = { ...room };
+      const prevPlayers = players;
       setRoom((prev) =>
         prev
           ? {
@@ -337,6 +361,34 @@ export const useRoomData = ({
             }
           : prev
       );
+      let migratedPlayers = null;
+      if (newSettings.teams === 2 && prevPlayers?.length) {
+        const cPlayers = [...prevPlayers]
+          .filter((p) => p.team === "C")
+          .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0));
+        if (cPlayers.length) {
+          let countA = prevPlayers.filter((p) => p.team === "A").length;
+          let countB = prevPlayers.filter((p) => p.team === "B").length;
+          const migrations = new Map();
+
+          for (const p of cPlayers) {
+            if (countA <= countB) {
+              migrations.set(p.id, "A");
+              countA += 1;
+            } else {
+              migrations.set(p.id, "B");
+              countB += 1;
+            }
+          }
+
+          migratedPlayers = prevPlayers.map((p) =>
+            migrations.has(p.id)
+              ? { ...p, team: migrations.get(p.id) }
+              : p
+          );
+          setPlayers(migratedPlayers);
+        }
+      }
 
       try {
         const res = await fetch("/api/update-settings", {
@@ -351,9 +403,10 @@ export const useRoomData = ({
         if (!res.ok) throw new Error();
       } catch {
         setRoom(prevRoom);
+        if (migratedPlayers) setPlayers(prevPlayers);
       }
     },
-    [playerId, room, setRoom]
+    [playerId, players, room, setPlayers, setRoom]
   );
 
   const handleEndGame = useCallback(async () => {
@@ -394,6 +447,60 @@ export const useRoomData = ({
     } catch {}
   }, [playerId, room]);
 
+  const dismissKickedNotice = useCallback(() => {
+    setKickedNotice(false);
+  }, []);
+
+  const kickPlayer = useCallback(
+    async (targetPlayerId) => {
+      if (!room || !playerId) return false;
+      if (room.host_player_id !== playerId) return false;
+      if (!targetPlayerId || targetPlayerId === playerId) return false;
+
+      const prevPlayers = players;
+      setPlayers((prev) => prev.filter((p) => p.id !== targetPlayerId));
+
+      try {
+        const res = await fetch("/api/kick-player", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            roomId: room.id,
+            playerId,
+            targetPlayerId,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          alert(data.error || "Failed to kick player");
+          setPlayers(prevPlayers);
+          return false;
+        }
+        return true;
+      } catch {
+        alert("Failed to kick player");
+        setPlayers(prevPlayers);
+        return false;
+      }
+    },
+    [playerId, players, room, setPlayers]
+  );
+
+  useEffect(() => {
+    if (loading) return;
+    if (room?.status !== "lobby") return;
+    if (!playerId) return;
+    const stillHere = players.some((p) => p.id === playerId);
+    if (stillHere) return;
+
+    try {
+      localStorage.removeItem(`seq_pid:${code}`);
+    } catch {}
+    setPlayerId(null);
+    setKickedNotice(true);
+    setAskNameOpen(true);
+  }, [code, loading, playerId, players, room?.status, setPlayerId]);
+
   return {
     loading,
     starting,
@@ -401,6 +508,7 @@ export const useRoomData = ({
     tempName,
     nameSubmitting,
     nameError,
+    kickedNotice,
     setTempName,
     setNameError,
     submitNameJoin,
@@ -409,5 +517,8 @@ export const useRoomData = ({
     updateSettings,
     handleEndGame,
     handlePlayAgain,
+    dismissKickedNotice,
+    kickPlayer,
+    refreshRoomState,
   };
 };

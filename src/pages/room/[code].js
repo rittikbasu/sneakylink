@@ -108,6 +108,7 @@ export default function RoomPage() {
     tempName,
     nameSubmitting,
     nameError,
+    kickedNotice,
     setTempName,
     setNameError,
     submitNameJoin,
@@ -116,6 +117,9 @@ export default function RoomPage() {
     updateSettings,
     handleEndGame,
     handlePlayAgain,
+    dismissKickedNotice,
+    kickPlayer,
+    refreshRoomState,
   } = useRoomData({
     code,
     router,
@@ -213,7 +217,13 @@ export default function RoomPage() {
   useResumeSync({
     roomId: room?.id,
     playerId,
-    onResume: refreshGameState,
+    onResume: (reason) => {
+      if (room?.status === "lobby") {
+        refreshRoomState?.(reason);
+      } else {
+        refreshGameState(reason);
+      }
+    },
   });
 
   const myTurn =
@@ -459,6 +469,7 @@ export default function RoomPage() {
           onUpdateSettings={updateSettings}
           onStartGame={startGame}
           starting={starting}
+          onKickPlayer={kickPlayer}
         />
       );
     }
@@ -648,37 +659,54 @@ export default function RoomPage() {
           <div className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[90vw] max-w-sm z-50 rounded-2xl border border-white/10 bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_70%,black_100%)] backdrop-blur p-5 shadow-xl">
             <div className="mb-4">
               <div className="text-lg font-semibold bg-linear-to-r from-white/90 via-gray-200 to-white/90 bg-clip-text text-transparent">
-                Enter your name
+                {kickedNotice ? "You were removed" : "Enter your name"}
               </div>
               <div className="text-sm text-zinc-500">
-                You need a name to join this room
+                {kickedNotice
+                  ? "The host removed you from the lobby."
+                  : "You need a name to join this room"}
               </div>
             </div>
-            <div className="space-y-3">
-              <input
-                className={`w-full rounded-xl bg-zinc-800/80 text-white placeholder-zinc-600 border focus:outline-none focus:ring-1 px-4 py-3 ${
-                  nameError
-                    ? "border-red-500 focus:border-red-500 focus:ring-red-500/50"
-                    : "border-zinc-700/50 focus:border-blue-500/50 focus:ring-blue-500/50"
-                }`}
-                value={tempName}
-                onChange={(e) => {
-                  const v = e.target.value.replace(/\s+/g, "").slice(0, 16);
-                  setTempName(v);
-                  if (nameError && e.target.value.trim()) setNameError(false);
-                }}
-                placeholder="Eg. Alex"
-                autoFocus
-                maxLength={16}
-              />
-              <button
-                onClick={submitNameJoin}
-                disabled={nameSubmitting}
-                className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-semibold"
-              >
-                {nameSubmitting ? "Joining..." : "Join Game"}
-              </button>
-            </div>
+            {kickedNotice ? (
+              <div className="space-y-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    dismissKickedNotice();
+                    router.push("/");
+                  }}
+                  className="w-full py-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-semibold"
+                >
+                  Back to Home
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <input
+                  className={`w-full rounded-xl bg-zinc-800/80 text-white placeholder-zinc-600 border focus:outline-none focus:ring-1 px-4 py-3 ${
+                    nameError
+                      ? "border-red-500 focus:border-red-500 focus:ring-red-500/50"
+                      : "border-zinc-700/50 focus:border-blue-500/50 focus:ring-blue-500/50"
+                  }`}
+                  value={tempName}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/\s+/g, "").slice(0, 16);
+                    setTempName(v);
+                    if (nameError && e.target.value.trim()) setNameError(false);
+                  }}
+                  placeholder="Eg. Alex"
+                  autoFocus
+                  maxLength={16}
+                />
+                <button
+                  onClick={submitNameJoin}
+                  disabled={nameSubmitting}
+                  className="w-full py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-semibold"
+                >
+                  {nameSubmitting ? "Joining..." : "Join Game"}
+                </button>
+              </div>
+            )}
           </div>
         </>
       )}

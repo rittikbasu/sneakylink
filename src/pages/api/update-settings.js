@@ -24,6 +24,53 @@ export default async function handler(req, res) {
       .json({ error: "Cannot change settings after start" });
 
   const newSettings = { ...room.settings, ...settings };
+
+  if (newSettings.teams === 2) {
+    const { data: players, error: playersErr } = await supabaseAdmin
+      .from("players")
+      .select("id, team, seat_index")
+      .eq("room_id", roomId);
+    if (playersErr) return res.status(500).json({ error: playersErr.message });
+
+    const cPlayers = (players || [])
+      .filter((p) => p.team === "C")
+      .sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0));
+    if (cPlayers.length) {
+      let countA = players.filter((p) => p.team === "A").length;
+      let countB = players.filter((p) => p.team === "B").length;
+      const toA = [];
+      const toB = [];
+
+      for (const p of cPlayers) {
+        if (countA <= countB) {
+          toA.push(p.id);
+          countA += 1;
+        } else {
+          toB.push(p.id);
+          countB += 1;
+        }
+      }
+
+      if (toA.length) {
+        const { error: updAErr } = await supabaseAdmin
+          .from("players")
+          .update({ team: "A" })
+          .in("id", toA)
+          .eq("room_id", roomId);
+        if (updAErr) return res.status(500).json({ error: updAErr.message });
+      }
+
+      if (toB.length) {
+        const { error: updBErr } = await supabaseAdmin
+          .from("players")
+          .update({ team: "B" })
+          .in("id", toB)
+          .eq("room_id", roomId);
+        if (updBErr) return res.status(500).json({ error: updBErr.message });
+      }
+    }
+  }
+
   const { error: updErr } = await supabaseAdmin
     .from("rooms")
     .update({ settings: newSettings })

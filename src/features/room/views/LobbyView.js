@@ -1,4 +1,5 @@
-import { Copy, Users, Check, Settings, Share2 } from "lucide-react";
+import { useState } from "react";
+import { Copy, Users, Check, Settings, Share2, X } from "lucide-react";
 
 export default function LobbyView({
   room,
@@ -14,6 +15,7 @@ export default function LobbyView({
   onUpdateSettings,
   onStartGame,
   starting,
+  onKickPlayer,
 }) {
   const numTeams = room.settings?.teams ?? 2;
   const aPlayers = players.filter((p) => p.team === "A");
@@ -26,6 +28,16 @@ export default function LobbyView({
   const balanced = teamCounts.every((c) => c === teamCounts[0] && c > 0);
   const myTeam = me?.team;
   const canShare = typeof navigator !== "undefined" && !!navigator.share;
+  const [kickTarget, setKickTarget] = useState(null);
+  const [kicking, setKicking] = useState(false);
+
+  const confirmKick = async () => {
+    if (!kickTarget || !onKickPlayer) return;
+    setKicking(true);
+    const ok = await onKickPlayer(kickTarget.id);
+    setKicking(false);
+    if (ok) setKickTarget(null);
+  };
 
   return (
     <div className="h-dvh overflow-y-auto text-white px-4 py-6">
@@ -128,6 +140,17 @@ export default function LobbyView({
                             HOST
                           </div>
                         )}
+                        {isHost && p.id !== playerId && (
+                          <button
+                            type="button"
+                            onClick={() => setKickTarget(p)}
+                            className="w-5 h-5 rounded-full bg-red-500/15 text-red-300 hover:bg-red-500/25 transition-colors flex items-center justify-center"
+                            aria-label={`Kick ${p.name}`}
+                            title={`Kick ${p.name}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   ))
@@ -178,6 +201,17 @@ export default function LobbyView({
                           <div className="text-[9px] px-1.5 py-0.5 rounded-full bg-sky-500/20 text-sky-400 font-medium">
                             HOST
                           </div>
+                        )}
+                        {isHost && p.id !== playerId && (
+                          <button
+                            type="button"
+                            onClick={() => setKickTarget(p)}
+                            className="w-5 h-5 rounded-full bg-red-500/15 text-red-300 hover:bg-red-500/25 transition-colors flex items-center justify-center"
+                            aria-label={`Kick ${p.name}`}
+                            title={`Kick ${p.name}`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
                         )}
                       </div>
                     </div>
@@ -230,6 +264,17 @@ export default function LobbyView({
                             <div className="text-[9px] px-1.5 py-0.5 rounded-full bg-rose-500/20 text-rose-400 font-medium">
                               HOST
                             </div>
+                          )}
+                          {isHost && p.id !== playerId && (
+                            <button
+                              type="button"
+                              onClick={() => setKickTarget(p)}
+                              className="w-5 h-5 rounded-full bg-red-500/15 text-red-300 hover:bg-red-500/25 transition-colors flex items-center justify-center"
+                              aria-label={`Kick ${p.name}`}
+                              title={`Kick ${p.name}`}
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
                           )}
                         </div>
                       </div>
@@ -406,6 +451,39 @@ export default function LobbyView({
           )}
         </div>
       </div>
+      {kickTarget && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm" />
+          <div className="fixed left-1/2 top-1/2 z-50 w-[90vw] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-2xl border border-white/10 bg-[linear-gradient(to_bottom,black_0%,rgb(20,20,20)_70%,black_100%)] p-5 shadow-xl">
+            <div className="mb-4">
+              <div className="text-lg font-semibold text-white">
+                Kick {kickTarget.name}?
+              </div>
+              <div className="text-sm text-zinc-500">
+                They can rejoin with the room code.
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setKickTarget(null)}
+                className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-white font-semibold"
+                disabled={kicking}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmKick}
+                className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white font-semibold"
+                disabled={kicking}
+              >
+                {kicking ? "Kicking..." : "Kick"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
