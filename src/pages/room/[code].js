@@ -1,10 +1,10 @@
 import { useRouter } from "next/router";
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import Image from "next/image";
-import { supabase } from "@/lib/supabaseClient";
 import layout from "@/data/boardLayout";
 import { parseCard, formatCard } from "@/lib/deck";
 import { useResumeSync } from "@/features/room/hooks/useResumeSync";
+import { useRoomData } from "@/features/room/hooks/useRoomData";
 import { useGameData } from "@/features/room/hooks/useGameData";
 import { useMoveActions } from "@/features/room/hooks/useMoveActions";
 import GameView from "@/features/room/views/GameView";
@@ -17,7 +17,6 @@ import {
   getTurnPlayer,
   groupPlayersByTeam,
 } from "@/features/room/selectors/roomSelectors";
-import { validateRoomCode } from "@/lib/id";
 import { Play } from "lucide-react";
 
 const POSITIONS_BY_CARD = (() => {
@@ -60,20 +59,13 @@ export default function RoomPage() {
 
   const [room, setRoom] = useState(null);
   const [players, setPlayers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [starting, setStarting] = useState(false);
   const [posting, setPosting] = useState(false);
   const [codeCopied, setCodeCopied] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const wakeLockRef = useRef(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
-  const [askNameOpen, setAskNameOpen] = useState(false);
   const [showGameOver, setShowGameOver] = useState(false);
-  const [tempName, setTempName] = useState("");
-  const [nameSubmitting, setNameSubmitting] = useState(false);
-  const [nameError, setNameError] = useState(false);
-  const deepLinkHandledRef = useRef(false);
 
   const isHost = room && playerId && room.host_player_id === playerId;
   const me = useMemo(
@@ -106,252 +98,42 @@ export default function RoomPage() {
     isOneEyed,
     isTwoEyed,
     allowedPositionsForCard,
+    setShowGameOver,
   });
 
-  useEffect(() => {
-    if (!code) return;
-    if (!validateRoomCode(code)) return;
-    if (playerId) return;
-    if (deepLinkHandledRef.current) return;
-    deepLinkHandledRef.current = true;
-
-    // 1. URL Param (Legacy/Direct)
-    const urlPid =
-      typeof router.query?.pid === "string" ? router.query.pid : null;
-    if (urlPid) {
-      setPlayerId(urlPid);
-      try {
-        localStorage.setItem(`seq_pid:${code}`, urlPid);
-      } catch {}
-      router.replace(`/room/${code}`, undefined, { shallow: true });
-      return;
-    }
-
-    // 2. LocalStorage
-    try {
-      const savedPid = localStorage.getItem(`seq_pid:${code}`);
-      if (savedPid) {
-        setPlayerId(savedPid);
-        return;
-      }
-    } catch {}
-
-    // 3. Auto-Join with saved name
-    (async () => {
-      try {
-        const savedName = localStorage.getItem("seq_name");
-        if (savedName && savedName.trim()) {
-          setNameSubmitting(true);
-          const res = await fetch("/api/join-room", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: savedName.trim(), code }),
-          });
-          const d = await res.json();
-          if (res.ok) {
-            try {
-              localStorage.setItem(`seq_pid:${d.code}`, d.player_id);
-            } catch {}
-            setPlayerId(d.player_id);
-            return;
-          }
-        }
-      } catch {}
-      setAskNameOpen(true);
-      setNameSubmitting(false);
-    })();
-  }, [code, playerId, router]);
-
-  async function submitNameJoin() {
-    if (!tempName.trim()) {
-      setNameError(true);
-      return;
-    }
-    setNameSubmitting(true);
-    try {
-      const res = await fetch("/api/join-room", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: tempName.trim(), code }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || "Failed to join");
-        return;
-      }
-      try {
-        localStorage.setItem("seq_name", tempName.trim());
-        localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
-      } catch {}
-      setAskNameOpen(false);
-      setPlayerId(data.player_id);
-    } catch (e) {
-      alert("Failed to join");
-    } finally {
-      setNameSubmitting(false);
-    }
-  }
-
-  // 1. Initial Load & Room Subscription (Stable)
-  useEffect(() => {
-    if (!code) return;
-    if (!validateRoomCode(code)) {
-      setLoading(false);
-      return;
-    }
-    let mounted = true;
-
-    (async () => {
-      const { data: roomRow } = await supabase
-        .from("rooms")
-        .select("*")
-        .eq("code", code)
-        .single();
-
-      if (!mounted) return;
-      setRoom(roomRow || null);
-
-      if (roomRow) {
-        const { data: ps } = await supabase
-          .from("players")
-          .select("*")
-          .eq("room_id", roomRow.id)
-          .order("seat_index", { ascending: true });
-        if (!mounted) return;
-        setPlayers(ps || []);
-
-        if (roomRow.status !== "lobby") {
-          const { data: gs } = await supabase
-            .from("games")
-            .select("*")
-            .eq("room_id", roomRow.id)
-            .order("created_at", { ascending: false })
-            .limit(1);
-          const g = gs && gs.length ? gs[0] : null;
-          setGame(g);
-
-          if (g && playerId) {
-            const { data: handRow } = await supabase
-              .from("hands")
-              .select("cards")
-              .eq("game_id", g.id)
-              .eq("player_id", playerId)
-              .single();
-            setHand(handRow?.cards || []);
-          }
-        } else {
-          setGame(null);
-          setHand([]);
-          setShowGameOver(false);
-        }
-      }
-      setLoading(false);
-    })();
-
-    const roomSub = supabase
-      .channel(`room-${code}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "rooms",
-          filter: `code=eq.${code}`,
-        },
-        (payload) => {
-          if (payload.new) {
-            setRoom(payload.new);
-            if (payload.new.status === "lobby") {
-              setGame(null);
-              setHand([]);
-              setSelectedCard(null);
-              setTargetSquare(null);
-              setShowGameOver(false);
-            }
-          }
-        }
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          refreshGameState("room-subscribe");
-        }
-      });
-
-    return () => {
-      mounted = false;
-      supabase.removeChannel(roomSub);
-    };
-  }, [code, playerId]);
-
-  // 2. Players & Games Subscription (Depends on Room ID)
-  useEffect(() => {
-    if (!room?.id) return;
-
-    const channel = supabase
-      .channel(`lobby:${room.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "players",
-          filter: `room_id=eq.${room.id}`,
-        },
-        (payload) => {
-          const type = payload.eventType;
-          const rowNew = payload.new;
-          const rowOld = payload.old;
-
-          if (type === "INSERT") {
-            setPlayers((prev) => {
-              const exists = prev.some((p) => p.id === rowNew.id);
-              if (exists) return prev;
-              const next = [...prev, rowNew];
-              next.sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0));
-              return next;
-            });
-          } else if (type === "UPDATE") {
-            setPlayers((prev) => {
-              const next = prev.map((p) =>
-                p.id === rowNew.id ? { ...p, ...rowNew } : p
-              );
-              next.sort((a, b) => (a.seat_index ?? 0) - (b.seat_index ?? 0));
-              return next;
-            });
-          } else if (type === "DELETE") {
-            setPlayers((prev) => prev.filter((p) => p.id !== rowOld.id));
-          }
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "games",
-          filter: `room_id=eq.${room.id}`,
-        },
-        (payload) => {
-          if (payload.new) {
-            setGame((prev) => {
-              if (!prev || payload.new.created_at >= prev.created_at) {
-                return payload.new;
-              }
-              return prev;
-            });
-          }
-        }
-      )
-      .subscribe((status) => {
-        if (status === "SUBSCRIBED") {
-          refreshGameState("lobby-subscribe");
-        }
-      });
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [room?.id]);
+  const {
+    loading,
+    starting,
+    askNameOpen,
+    tempName,
+    nameSubmitting,
+    nameError,
+    setTempName,
+    setNameError,
+    submitNameJoin,
+    startGame,
+    switchTeam,
+    updateSettings,
+    handleEndGame,
+    handlePlayAgain,
+  } = useRoomData({
+    code,
+    router,
+    playerId,
+    setPlayerId,
+    room,
+    setRoom,
+    players,
+    setPlayers,
+    game,
+    setGame,
+    setHand,
+    setSelectedCard,
+    setTargetSquare,
+    setShowGameOver,
+    refreshGameState,
+    onEndGameConfirmed: () => setSidebarOpen(false),
+  });
 
   // Screen Wake Lock - keep screen on during game (best effort)
   useEffect(() => {
@@ -434,16 +216,6 @@ export default function RoomPage() {
     onResume: refreshGameState,
   });
 
-  useEffect(() => {
-    if (game?.finished_at) {
-      setShowGameOver(true);
-      setSelectedCard(null);
-      setTargetSquare(null);
-    } else {
-      setShowGameOver(false);
-    }
-  }, [game?.finished_at]);
-
   const myTurn =
     game && me && game.current_team === me.team && room?.status === "active";
   const currentRoomId = room?.id;
@@ -485,12 +257,15 @@ export default function RoomPage() {
     [playersByTurnSafe, game]
   );
 
-  const onSquareClick = useCallback((idx) => {
-    if (!myTurn || !selectedCard || posting || turnPlayer?.id !== me?.id)
-      return;
-    if (!allowed || !allowed.has(idx)) return;
-    setTargetSquare(idx);
-  }, [allowed, me?.id, myTurn, posting, selectedCard, turnPlayer]);
+  const onSquareClick = useCallback(
+    (idx) => {
+      if (!myTurn || !selectedCard || posting || turnPlayer?.id !== me?.id)
+        return;
+      if (!allowed || !allowed.has(idx)) return;
+      setTargetSquare(idx);
+    },
+    [allowed, me?.id, myTurn, posting, selectedCard, setTargetSquare, turnPlayer]
+  );
 
   const teamColor =
     (turnPlayer?.team === "A"
@@ -541,7 +316,7 @@ export default function RoomPage() {
       setSelectedCard(card === selectedCard ? null : card);
       setTargetSquare(null);
     },
-    [selectedCard]
+    [selectedCard, setSelectedCard, setTargetSquare]
   );
 
   const footerProps = useMemo(
@@ -573,72 +348,6 @@ export default function RoomPage() {
       turnPlayer?.name,
     ]
   );
-
-  const startGame = async () => {
-    if (!room || !playerId) return;
-    setStarting(true);
-    try {
-      const res = await fetch("/api/start-game", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId: room.id, playerId }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to start");
-    } catch (e) {
-      alert(e.message || "Failed to start game");
-    } finally {
-      setStarting(false);
-    }
-  };
-
-  async function switchTeam(nextTeam) {
-    if (!room || !playerId || !["A", "B", "C"].includes(nextTeam)) return;
-
-    const prevPlayers = [...players];
-    setPlayers((prev) =>
-      prev.map((p) => (p.id === playerId ? { ...p, team: nextTeam } : p))
-    );
-
-    try {
-      await fetch("/api/switch-team", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId: room.id, playerId, team: nextTeam }),
-      });
-    } catch {
-      setPlayers(prevPlayers);
-    }
-  }
-
-  async function updateSettings(newSettings) {
-    if (!room || !playerId || !isHost) return;
-
-    const prevRoom = { ...room };
-    setRoom((prev) =>
-      prev
-        ? {
-            ...prev,
-            settings: { ...(prev.settings || {}), ...newSettings },
-          }
-        : prev
-    );
-
-    try {
-      const res = await fetch("/api/update-settings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomId: room.id,
-          playerId,
-          settings: newSettings,
-        }),
-      });
-      if (!res.ok) throw new Error();
-    } catch {
-      setRoom(prevRoom);
-    }
-  }
 
   function copyCode() {
     if (!room) return;
@@ -711,44 +420,6 @@ export default function RoomPage() {
       return !!ok;
     } catch {}
     return false;
-  }
-
-  async function handleEndGame() {
-    if (!room || !game || !playerId || !isHost) return;
-    const confirmed = confirm(
-      "Are you sure you want to end this game? This cannot be undone."
-    );
-    if (!confirmed) return;
-
-    setSidebarOpen(false);
-    try {
-      const res = await fetch("/api/end-game", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          roomId: room.id,
-          gameId: game.id,
-          playerId,
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        alert(err.error || "Failed to end game");
-      }
-    } catch (e) {
-      alert("Failed to end game");
-    }
-  }
-
-  async function handlePlayAgain() {
-    if (!room || !isHost) return;
-    try {
-      await fetch("/api/play-again", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roomId: room.id, playerId }),
-      });
-    } catch {}
   }
 
   const content = () => {

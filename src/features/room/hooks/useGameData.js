@@ -9,8 +9,9 @@ export const useGameData = ({
   isOneEyed,
   isTwoEyed,
   allowedPositionsForCard,
+  setShowGameOver,
 }) => {
-  const [game, setGame] = useState(null);
+  const [game, setGameState] = useState(null);
   const [hand, setHand] = useState([]);
   const [selectedCard, setSelectedCard] = useState(null);
   const [targetSquare, setTargetSquare] = useState(null);
@@ -25,6 +26,31 @@ export const useGameData = ({
   const gameRef = useRef(null);
   const lastSyncRef = useRef(0);
   const syncInFlightRef = useRef(false);
+
+  const setGame = useCallback(
+    (updater) => {
+      let finishTransition = null;
+      setGameState((prev) => {
+        const next =
+          typeof updater === "function" ? updater(prev) : updater ?? null;
+        const prevFinished = !!prev?.finished_at;
+        const nextFinished = !!next?.finished_at;
+        if (prevFinished !== nextFinished) {
+          finishTransition = nextFinished;
+        }
+        return next;
+      });
+
+      if (finishTransition === true) {
+        setSelectedCard(null);
+        setTargetSquare(null);
+        setShowGameOver?.(true);
+      } else if (finishTransition === false) {
+        setShowGameOver?.(false);
+      }
+    },
+    [setShowGameOver]
+  );
 
   const refreshGameState = useCallback(async (reason = "resume") => {
     const roomId = roomIdRef.current;
@@ -75,7 +101,7 @@ export const useGameData = ({
     } finally {
       syncInFlightRef.current = false;
     }
-  }, []);
+  }, [setGame]);
 
   useEffect(() => {
     roomIdRef.current = room?.id || null;
