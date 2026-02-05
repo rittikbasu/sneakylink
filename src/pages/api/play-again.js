@@ -11,7 +11,7 @@ export default async function handler(req, res) {
   // Verify host
   const { data: room, error: roomErr } = await supabaseAdmin
     .from("rooms")
-    .select("id, host_player_id, status")
+    .select("id, host_player_id, status, settings")
     .eq("id", roomId)
     .single();
 
@@ -21,10 +21,13 @@ export default async function handler(req, res) {
   if (room.host_player_id !== playerId)
     return res.status(403).json({ error: "Only host can play again" });
 
-  // Reset room status to lobby
+  // Reset room status to lobby and clear stale ended_by_host flag
+  const cleanSettings = { ...(room.settings || {}) };
+  delete cleanSettings.ended_by_host;
+
   const { error: updErr } = await supabaseAdmin
     .from("rooms")
-    .update({ status: "lobby" })
+    .update({ status: "lobby", settings: cleanSettings })
     .eq("id", roomId);
 
   if (updErr)

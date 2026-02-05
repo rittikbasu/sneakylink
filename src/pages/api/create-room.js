@@ -13,7 +13,6 @@ export default async function handler(req, res) {
   if (!normalizedName) {
     return res.status(400).json({ error: "Name is required" });
   }
-  const code = generateRoomCode(6);
   const roomSettings = {
     hand_size: 5,
     teams: 2,
@@ -21,12 +20,32 @@ export default async function handler(req, res) {
     ...(settings || {}),
   };
 
-  const { data: room, error: roomErr } = await supabaseAdmin
-    .from("rooms")
-    .insert({ code, status: "lobby", settings: roomSettings })
-    .select()
-    .single();
-  if (roomErr) return res.status(500).json({ error: roomErr.message });
+  // Retry loop to handle potential room code collisions
+  let room = null;
+  let roomErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const code = generateRoomCode(6);
+    const { data, error } = await supabaseAdmin
+      .from("rooms")
+      .insert({ code, status: "lobby", settings: roomSettings })
+      .select()
+      .single();
+    if (!error) {
+      room = data;
+      roomErr = null;
+      break;
+    }
+    // If it's a unique constraint violation, retry with a new code
+    if (error.code === "23505") {
+      roomErr = error;
+      continue;
+    }
+    // For any other error, bail immediately
+    roomErr = error;
+    break;
+  }
+  if (roomErr || !room)
+    return res.status(500).json({ error: roomErr?.message || "Failed to create room" });
 
   const { data: player, error: playerErr } = await supabaseAdmin
     .from("players")

@@ -27,26 +27,58 @@ export const useRoomData = ({
   const [nameSubmitting, setNameSubmitting] = useState(false);
   const [nameError, setNameError] = useState(false);
   const [kickedNotice, setKickedNotice] = useState(false);
-  const deepLinkHandledRef = useRef(false);
+  // Track per-code so navigating from /room/ABC to /room/DEF resets properly
+  const deepLinkCodeRef = useRef(null);
+
+  // When the room code changes (client-side navigation between rooms),
+  // clear stale state from the previous room so auto-join runs fresh.
+  const prevCodeRef = useRef(null);
+  useEffect(() => {
+    if (prevCodeRef.current !== null && prevCodeRef.current !== code) {
+      setPlayerId(null);
+      setKickedNotice(false);
+      setAskNameOpen(false);
+    }
+    prevCodeRef.current = code;
+  }, [code, setPlayerId]);
+
+  const lastRoomSyncRef = useRef(0);
+  const roomSyncInFlightRef = useRef(false);
 
   const refreshRoomState = useCallback(async (reason = "resume") => {
     if (!code) return;
     if (!validateRoomCode(code)) return;
+    if (roomSyncInFlightRef.current) return;
+    const now = Date.now();
+    if (now - lastRoomSyncRef.current < 2000) return;
+    roomSyncInFlightRef.current = true;
+    lastRoomSyncRef.current = now;
 
-    const { data: roomRow } = await supabase
-      .from("rooms")
-      .select("*")
-      .eq("code", code)
-      .single();
-    setRoom(roomRow || null);
-
-    if (roomRow) {
-      const { data: ps } = await supabase
-        .from("players")
+    try {
+      const { data: roomRow } = await supabase
+        .from("rooms")
         .select("*")
-        .eq("room_id", roomRow.id)
-        .order("seat_index", { ascending: true });
-      setPlayers(ps || []);
+        .eq("code", code)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      let ps = [];
+      if (roomRow) {
+        const { data } = await supabase
+          .from("players")
+          .select("*")
+          .eq("room_id", roomRow.id)
+          .order("seat_index", { ascending: true });
+        ps = data || [];
+      }
+
+      // Batch both updates in the same tick to prevent
+      // an intermediate render with new room but stale players
+      setRoom(roomRow || null);
+      setPlayers(ps);
+    } finally {
+      roomSyncInFlightRef.current = false;
     }
   }, [code, setPlayers, setRoom]);
 
@@ -54,8 +86,8 @@ export const useRoomData = ({
     if (!code) return;
     if (!validateRoomCode(code)) return;
     if (playerId) return;
-    if (deepLinkHandledRef.current) return;
-    deepLinkHandledRef.current = true;
+    if (deepLinkCodeRef.current === code) return;
+    deepLinkCodeRef.current = code;
 
     // 1. URL Param (Legacy/Direct)
     const urlPid =
@@ -145,23 +177,31 @@ export const useRoomData = ({
     let mounted = true;
 
     (async () => {
+      // Fetch ALL data before setting any state to prevent intermediate
+      // renders where room is set but players list is stale (which causes
+      // the kicked-detection to fire false positives + duplicate players)
       const { data: roomRow } = await supabase
         .from("rooms")
         .select("*")
         .eq("code", code)
+        .order("created_at", { ascending: false })
+        .limit(1)
         .single();
 
       if (!mounted) return;
-      setRoom(roomRow || null);
+
+      let ps = [];
+      let g = null;
+      let handCards = null;
 
       if (roomRow) {
-        const { data: ps } = await supabase
+        const { data: playersData } = await supabase
           .from("players")
           .select("*")
           .eq("room_id", roomRow.id)
           .order("seat_index", { ascending: true });
         if (!mounted) return;
-        setPlayers(ps || []);
+        ps = playersData || [];
 
         if (roomRow.status !== "lobby") {
           const { data: gs } = await supabase
@@ -170,8 +210,7 @@ export const useRoomData = ({
             .eq("room_id", roomRow.id)
             .order("created_at", { ascending: false })
             .limit(1);
-          const g = gs && gs.length ? gs[0] : null;
-          setGame(g);
+          g = gs && gs.length ? gs[0] : null;
 
           if (g && playerId) {
             const { data: handRow } = await supabase
@@ -180,13 +219,26 @@ export const useRoomData = ({
               .eq("game_id", g.id)
               .eq("player_id", playerId)
               .single();
-            setHand(handRow?.cards || []);
+            handCards = handRow?.cards || [];
           }
-        } else {
-          setGame(null);
-          setHand([]);
-          setShowGameOver(false);
         }
+      }
+
+      if (!mounted) return;
+
+      // Batch ALL state updates in the same synchronous tick so React
+      // renders them together — no intermediate "room=lobby, players=stale"
+      setRoom(roomRow || null);
+      setPlayers(ps);
+      if (roomRow && roomRow.status !== "lobby") {
+        setGame(g);
+        if (handCards !== null) {
+          setHand(handCards);
+        }
+      } else {
+        setGame(null);
+        setHand([]);
+        setShowGameOver(false);
       }
       setLoading(false);
     })();
@@ -216,6 +268,9 @@ export const useRoomData = ({
       )
       .subscribe((status) => {
         if (status === "SUBSCRIBED") {
+          // On reconnect, refresh both room AND game state
+          // (realtime doesn't replay events missed while disconnected)
+          refreshRoomState("room-subscribe");
           refreshGameState("room-subscribe");
         }
       });
@@ -228,6 +283,7 @@ export const useRoomData = ({
     code,
     playerId,
     refreshGameState,
+    refreshRoomState,
     setGame,
     setHand,
     setRoom,
@@ -439,12 +495,18 @@ export const useRoomData = ({
   const handlePlayAgain = useCallback(async () => {
     if (!room || room.host_player_id !== playerId) return;
     try {
-      await fetch("/api/play-again", {
+      const res = await fetch("/api/play-again", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ roomId: room.id, playerId }),
       });
-    } catch {}
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.error || "Failed to start new round");
+      }
+    } catch {
+      alert("Failed to start new round. Please try again.");
+    }
   }, [playerId, room]);
 
   const leaveRoom = useCallback(async () => {

@@ -14,10 +14,14 @@ export default async function handler(req, res) {
       .trim()
       .slice(0, 16);
 
+  // Prefer the most recently created room with this code
+  // (handles edge case of code collision with an old finished room)
   const { data: room, error: roomErr } = await supabaseAdmin
     .from("rooms")
     .select("id, code, status, settings")
     .eq("code", normalizedCode)
+    .order("created_at", { ascending: false })
+    .limit(1)
     .single();
   if (roomErr || !room)
     return res.status(404).json({ error: "Room not found" });

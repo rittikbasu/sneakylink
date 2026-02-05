@@ -220,9 +220,11 @@ export default function RoomPage() {
     roomId: room?.id,
     playerId,
     onResume: (reason) => {
-      if (room?.status === "lobby") {
-        refreshRoomState?.(reason);
-      } else {
+      // Always refresh room state on resume — realtime doesn't replay
+      // events missed while the tab was in background, so the room
+      // could have changed status (e.g. finished → lobby via Play Again)
+      refreshRoomState?.(reason);
+      if (room?.status !== "lobby") {
         refreshGameState(reason);
       }
     },
