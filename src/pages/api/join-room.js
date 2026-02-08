@@ -1,14 +1,23 @@
 import { validateRoomCode } from "@/lib/id";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { isUuid } from "@/lib/uuid";
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
-  const { name, code, player_id: rejoinPlayerId } = req.body || {};
+  const {
+    name,
+    code,
+    player_id: rejoinPlayerId,
+    client_id: clientIdRaw,
+  } = req.body || {};
   if (!code) return res.status(400).json({ error: "Code is required" });
   const normalizedCode = String(code).toUpperCase();
   if (!validateRoomCode(normalizedCode))
     return res.status(400).json({ error: "Invalid room code" });
+  const clientId = String(clientIdRaw || "").trim();
+  if (!isUuid(clientId))
+    return res.status(400).json({ error: "client_id is required" });
   const normalizeName = (s) =>
     String(s || "")
       .trim()
@@ -26,19 +35,54 @@ export default async function handler(req, res) {
   if (roomErr || !room)
     return res.status(404).json({ error: "Room not found" });
 
-  // Rejoin path: if client provides a known player_id, allow entry regardless of room status
+  // Rejoin path: prefer client_id if available
+  const { data: existingByClient, error: existingByClientErr } =
+    await supabaseAdmin
+      .from("players")
+      .select("id")
+      .eq("room_id", room.id)
+      .eq("client_id", clientId)
+      .limit(1);
+  if (existingByClientErr)
+    return res.status(500).json({ error: existingByClientErr.message });
+  if (existingByClient && existingByClient.length) {
+    return res.status(200).json({
+      code: room.code,
+      room_id: room.id,
+      player_id: existingByClient[0].id,
+    });
+  }
+
+  // Legacy rejoin path: if client provides a known player_id, allow entry regardless of room status
   if (rejoinPlayerId) {
     const { data: existing, error: existingErr } = await supabaseAdmin
       .from("players")
-      .select("id")
+      .select("id, client_id")
       .eq("id", rejoinPlayerId)
       .eq("room_id", room.id)
-      .single();
-    if (existingErr || !existing)
-      return res.status(404).json({ error: "Player not found in this room" });
-    return res
-      .status(200)
-      .json({ code: room.code, room_id: room.id, player_id: rejoinPlayerId });
+      .limit(1);
+    if (existingErr)
+      return res.status(500).json({ error: existingErr.message });
+    if (existing && existing.length) {
+      const row = existing[0];
+      if (row.client_id && row.client_id !== clientId) {
+        return res.status(409).json({ error: "Player already claimed" });
+      }
+      if (!row.client_id) {
+        await supabaseAdmin
+          .from("players")
+          .update({ client_id: clientId })
+          .eq("id", row.id)
+          .eq("room_id", room.id)
+          .is("client_id", null);
+      }
+      return res.status(200).json({
+        code: room.code,
+        room_id: room.id,
+        player_id: row.id,
+      });
+    }
+    return res.status(404).json({ error: "Player not found in this room" });
   }
 
   if (!name) return res.status(400).json({ error: "Name is required to join" });
@@ -77,6 +121,7 @@ export default async function handler(req, res) {
       team,
       seat_index,
       is_host: false,
+      client_id: clientId,
     })
     .select()
     .single();

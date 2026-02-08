@@ -95,7 +95,7 @@ export default function GameOverOverlay({
                 </span>
               </div>
               {activeTeams === 3 && (
-                <div className="flex items-center justify-between px-4 py-3 rounded-lg bg-rose-500/10 border border-rose-500/20">
+                <div className="flex items-center justify-between px-4 py-3 rounded-xl bg-rose-500/10 border border-rose-500/20">
                   <span className="text-rose-400 font-semibold">
                     {(isSolo ? grouped.C[0]?.name : "Team C") || "Team C"}
                   </span>

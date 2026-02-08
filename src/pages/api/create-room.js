@@ -1,10 +1,11 @@
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { generateRoomCode } from "@/lib/id";
+import { isUuid } from "@/lib/uuid";
 
 export default async function handler(req, res) {
   if (req.method !== "POST")
     return res.status(405).json({ error: "Method not allowed" });
-  const { name, settings } = req.body || {};
+  const { name, settings, client_id: clientIdRaw } = req.body || {};
   const normalizeName = (s) =>
     String(s || "")
       .trim()
@@ -12,6 +13,10 @@ export default async function handler(req, res) {
   const normalizedName = normalizeName(name);
   if (!normalizedName) {
     return res.status(400).json({ error: "Name is required" });
+  }
+  const clientId = String(clientIdRaw || "").trim();
+  if (!isUuid(clientId)) {
+    return res.status(400).json({ error: "client_id is required" });
   }
   const roomSettings = {
     hand_size: 5,
@@ -55,6 +60,7 @@ export default async function handler(req, res) {
       team: "A",
       seat_index: 0,
       is_host: true,
+      client_id: clientId,
     })
     .select()
     .single();

@@ -109,6 +109,7 @@ export default function RoomPage() {
     nameSubmitting,
     nameError,
     kickedNotice,
+    resolvingPlayer,
     setTempName,
     setNameError,
     submitNameJoin,
@@ -140,6 +141,7 @@ export default function RoomPage() {
     refreshGameState,
     onEndGameConfirmed: () => setSidebarOpen(false),
   });
+
 
   // Screen Wake Lock - keep screen on during game (best effort)
   useEffect(() => {
@@ -474,9 +476,6 @@ export default function RoomPage() {
             <button
               type="button"
               onClick={() => {
-                try {
-                  localStorage.removeItem(`seq_pid:${room.code}`);
-                } catch {}
                 setPlayerId(null);
                 router.push("/");
               }}
@@ -508,6 +507,22 @@ export default function RoomPage() {
           onLeaveRoom={leaveRoom}
           onEndRoom={endRoom}
         />
+      );
+    }
+
+    if (!playerId && resolvingPlayer) {
+      return (
+        <div className="min-h-dvh grid place-items-center">
+          <div className="flex flex-col items-center gap-4">
+            <Image
+              src="/cards.svg"
+              alt="Loading"
+              width={128}
+              height={128}
+              className="brightness-150 animate-flip rotate-20"
+            />
+          </div>
+        </div>
       );
     }
 

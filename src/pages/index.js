@@ -2,6 +2,7 @@ import { useRouter } from "next/router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { validateRoomCode } from "@/lib/id";
+import { getClientId } from "@/lib/clientId";
 
 export default function Home() {
   const router = useRouter();
@@ -42,16 +43,14 @@ export default function Home() {
     }
     setIsCreating(true);
     try {
+      const clientId = getClientId();
       const res = await fetch("/api/create-room", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim() }),
+        body: JSON.stringify({ name: name.trim(), client_id: clientId }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to create room");
-      try {
-        localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
-      } catch {}
       await router.push(`/room/${data.code}`);
     } catch (e) {
       console.error(e);
@@ -69,27 +68,18 @@ export default function Home() {
     }
     setIsJoining(true);
     try {
-      try {
-        const existingPid = localStorage.getItem(`seq_pid:${trimmedCode}`);
-        if (existingPid) {
-          await router.push(`/room/${trimmedCode}`);
-          return;
-        }
-      } catch {}
-
+      const clientId = getClientId();
       const res = await fetch("/api/join-room", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: name.trim(),
           code: trimmedCode,
+          client_id: clientId,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Failed to join room");
-      try {
-        localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
-      } catch {}
       await router.push(`/room/${data.code}`);
     } catch (e) {
       console.error(e);

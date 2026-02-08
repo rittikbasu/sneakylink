@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
 import { validateRoomCode } from "@/lib/id";
+import { getClientId } from "@/lib/clientId";
 
 export const useRoomData = ({
   code,
@@ -25,8 +26,10 @@ export const useRoomData = ({
   const [askNameOpen, setAskNameOpen] = useState(false);
   const [tempName, setTempName] = useState("");
   const [nameSubmitting, setNameSubmitting] = useState(false);
+  const [resolvingPlayer, setResolvingPlayer] = useState(false);
   const [nameError, setNameError] = useState(false);
   const [kickedNotice, setKickedNotice] = useState(false);
+  const kickCheckRef = useRef({ inFlight: false, lastAt: 0 });
   // Track per-code so navigating from /room/ABC to /room/DEF resets properly
   const deepLinkCodeRef = useRef(null);
 
@@ -45,12 +48,12 @@ export const useRoomData = ({
   const lastRoomSyncRef = useRef(0);
   const roomSyncInFlightRef = useRef(false);
 
-  const refreshRoomState = useCallback(async (reason = "resume") => {
+  const refreshRoomState = useCallback(async (reason = "resume", force = false) => {
     if (!code) return;
     if (!validateRoomCode(code)) return;
     if (roomSyncInFlightRef.current) return;
     const now = Date.now();
-    if (now - lastRoomSyncRef.current < 2000) return;
+    if (!force && now - lastRoomSyncRef.current < 2000) return;
     roomSyncInFlightRef.current = true;
     lastRoomSyncRef.current = now;
 
@@ -82,59 +85,132 @@ export const useRoomData = ({
     }
   }, [code, setPlayers, setRoom]);
 
+  const joinRoomWithClient = useCallback(
+    async ({ name, playerId: legacyPlayerId } = {}) => {
+      if (!code) return { ok: false, data: { error: "Missing code" } };
+      const clientId = getClientId();
+      const payload = { code, client_id: clientId };
+      if (name) payload.name = name;
+      if (legacyPlayerId) payload.player_id = legacyPlayerId;
+
+      try {
+        const res = await fetch("/api/join-room", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json().catch(() => ({}));
+        return { ok: res.ok, status: res.status, data };
+      } catch {
+        return { ok: false, status: 0, data: { error: "Network error" } };
+      }
+    },
+    [code]
+  );
+
   useEffect(() => {
     if (!code) return;
     if (!validateRoomCode(code)) return;
     if (playerId) return;
     if (deepLinkCodeRef.current === code) return;
     deepLinkCodeRef.current = code;
+    let cancelled = false;
 
-    // 1. URL Param (Legacy/Direct)
-    const urlPid =
-      typeof router.query?.pid === "string" ? router.query.pid : null;
-    if (urlPid) {
-      setPlayerId(urlPid);
-      try {
-        localStorage.setItem(`seq_pid:${code}`, urlPid);
-      } catch {}
-      router.replace(`/room/${code}`, undefined, { shallow: true });
-      return;
-    }
-
-    // 2. LocalStorage
-    try {
-      const savedPid = localStorage.getItem(`seq_pid:${code}`);
-      if (savedPid) {
-        setPlayerId(savedPid);
-        return;
-      }
-    } catch {}
-
-    // 3. Auto-Join with saved name
     (async () => {
+      setResolvingPlayer(true);
+      // Attempt rejoin / auto-join using client_id
       try {
-        const savedName = localStorage.getItem("seq_name");
-        if (savedName && savedName.trim()) {
-          setNameSubmitting(true);
-          const res = await fetch("/api/join-room", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name: savedName.trim(), code }),
+        const legacyPid = localStorage.getItem(`seq_pid:${code}`);
+        if (legacyPid) {
+          const { ok, data } = await joinRoomWithClient({
+            playerId: legacyPid,
           });
-          const d = await res.json();
-          if (res.ok) {
+          if (cancelled) return;
+          if (ok) {
+            setPlayerId(data.player_id);
+            setAskNameOpen(false);
+            setKickedNotice(false);
+            refreshRoomState("legacy-rejoin", true);
             try {
-              localStorage.setItem(`seq_pid:${d.code}`, d.player_id);
+              localStorage.removeItem(`seq_pid:${code}`);
             } catch {}
-            setPlayerId(d.player_id);
             return;
           }
+          const legacyErr = data?.error;
+          if (legacyErr === "Player not found in this room") {
+            try {
+              localStorage.removeItem(`seq_pid:${code}`);
+            } catch {}
+          }
         }
-      } catch {}
-      setAskNameOpen(true);
-      setNameSubmitting(false);
+
+        const savedName = localStorage.getItem("seq_name");
+        const trimmedName = savedName?.trim();
+        if (trimmedName) setNameSubmitting(true);
+
+        const { ok, data } = await joinRoomWithClient({
+          name: trimmedName || undefined,
+        });
+        if (cancelled) return;
+
+        if (ok) {
+          setPlayerId(data.player_id);
+          setAskNameOpen(false);
+          setKickedNotice(false);
+          refreshRoomState("auto-join", true);
+          return;
+        }
+
+        const err = data?.error;
+        if (err === "Name is required to join") {
+          setAskNameOpen(true);
+        } else if (err === "Game already started") {
+          // RoomGate will handle the UI
+        } else if (err === "Room not found") {
+          // Let the room loader handle it
+        } else {
+          setAskNameOpen(true);
+        }
+      } finally {
+        if (!cancelled) {
+          setNameSubmitting(false);
+          setResolvingPlayer(false);
+        }
+      }
     })();
-  }, [code, playerId, router, setPlayerId]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [code, joinRoomWithClient, playerId, refreshRoomState, setPlayerId]);
+
+  useEffect(() => {
+    if (!room || room.status === "lobby") return;
+    if (playerId || resolvingPlayer) return;
+    let cancelled = false;
+
+    (async () => {
+      setResolvingPlayer(true);
+      const { ok, data } = await joinRoomWithClient();
+      if (cancelled) return;
+      if (ok) {
+        setPlayerId(data.player_id);
+        refreshRoomState("active-rejoin", true);
+      }
+      setResolvingPlayer(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    joinRoomWithClient,
+    playerId,
+    refreshRoomState,
+    resolvingPlayer,
+    room,
+    setPlayerId,
+  ]);
 
   const submitNameJoin = useCallback(async () => {
     if (!tempName.trim()) {
@@ -143,29 +219,26 @@ export const useRoomData = ({
     }
     setNameSubmitting(true);
     try {
-      const res = await fetch("/api/join-room", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: tempName.trim(), code }),
+      const { ok, data } = await joinRoomWithClient({
+        name: tempName.trim(),
       });
-      const data = await res.json();
-      if (!res.ok) {
+      if (!ok) {
         alert(data.error || "Failed to join");
         return;
       }
       try {
         localStorage.setItem("seq_name", tempName.trim());
-        localStorage.setItem(`seq_pid:${data.code}`, data.player_id);
       } catch {}
       setAskNameOpen(false);
       setKickedNotice(false);
       setPlayerId(data.player_id);
+      refreshRoomState("name-join", true);
     } catch {
       alert("Failed to join");
     } finally {
       setNameSubmitting(false);
     }
-  }, [code, setPlayerId, tempName]);
+  }, [joinRoomWithClient, refreshRoomState, setPlayerId, tempName]);
 
   // 1. Initial Load & Room Subscription (Stable)
   useEffect(() => {
@@ -528,9 +601,6 @@ export const useRoomData = ({
         alert(data.error || "Failed to leave room");
         return false;
       }
-      try {
-        localStorage.removeItem(`seq_pid:${code}`);
-      } catch {}
       setPlayers((prev) => prev.filter((p) => p.id !== playerId));
       setPlayerId(null);
       router.push("/");
@@ -539,7 +609,7 @@ export const useRoomData = ({
       alert("Failed to leave room");
       return false;
     }
-  }, [code, playerId, room, router, setPlayerId, setPlayers]);
+  }, [playerId, room, router, setPlayerId, setPlayers]);
 
   const endRoom = useCallback(async () => {
     if (!room || !playerId) return false;
@@ -560,9 +630,6 @@ export const useRoomData = ({
         alert(data.error || "Failed to end room");
         return false;
       }
-      try {
-        localStorage.removeItem(`seq_pid:${code}`);
-      } catch {}
       setPlayers([]);
       setRoom(null);
       setPlayerId(null);
@@ -572,7 +639,7 @@ export const useRoomData = ({
       alert("Failed to end room");
       return false;
     }
-  }, [code, playerId, room, router, setPlayerId, setPlayers, setRoom]);
+  }, [playerId, room, router, setPlayerId, setPlayers, setRoom]);
 
   const dismissKickedNotice = useCallback(() => {
     setKickedNotice(false);
@@ -619,14 +686,38 @@ export const useRoomData = ({
     if (!playerId) return;
     const stillHere = players.some((p) => p.id === playerId);
     if (stillHere) return;
+    const now = Date.now();
+    if (kickCheckRef.current.inFlight) return;
+    if (now - kickCheckRef.current.lastAt < 1500) return;
+    kickCheckRef.current.inFlight = true;
+    kickCheckRef.current.lastAt = now;
 
-    try {
-      localStorage.removeItem(`seq_pid:${code}`);
-    } catch {}
-    setPlayerId(null);
-    setKickedNotice(true);
-    setAskNameOpen(true);
-  }, [code, loading, playerId, players, room?.status, setPlayerId]);
+    (async () => {
+      const { ok, data } = await joinRoomWithClient();
+      kickCheckRef.current.inFlight = false;
+
+      if (ok) {
+        setPlayerId(data.player_id);
+        refreshRoomState("kick-check", true);
+        return;
+      }
+
+      const err = data?.error;
+      if (err === "Name is required to join") {
+        setPlayerId(null);
+        setKickedNotice(true);
+        setAskNameOpen(true);
+      }
+    })();
+  }, [
+    joinRoomWithClient,
+    loading,
+    playerId,
+    players,
+    refreshRoomState,
+    room?.status,
+    setPlayerId,
+  ]);
 
   return {
     loading,
@@ -636,6 +727,7 @@ export const useRoomData = ({
     nameSubmitting,
     nameError,
     kickedNotice,
+    resolvingPlayer,
     setTempName,
     setNameError,
     submitNameJoin,

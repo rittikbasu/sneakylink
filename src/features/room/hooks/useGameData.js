@@ -24,12 +24,14 @@ export const useGameData = ({
   const roomStatusRef = useRef(null);
   const playerIdRef = useRef(null);
   const gameRef = useRef(null);
+  const lastFinishedGameIdRef = useRef(null);
   const lastSyncRef = useRef(0);
   const syncInFlightRef = useRef(false);
 
   const setGame = useCallback(
     (updater) => {
       let finishTransition = null;
+      let nextSnapshot = null;
       setGameState((prev) => {
         const next =
           typeof updater === "function" ? updater(prev) : updater ?? null;
@@ -38,13 +40,23 @@ export const useGameData = ({
         if (prevFinished !== nextFinished) {
           finishTransition = nextFinished;
         }
+        nextSnapshot = next;
         return next;
       });
 
       if (finishTransition === true) {
         setSelectedCard(null);
         setTargetSquare(null);
+      }
+
+      const nextId = nextSnapshot?.id;
+      const nextFinished = !!nextSnapshot?.finished_at;
+      if (nextFinished && nextId && lastFinishedGameIdRef.current !== nextId) {
         setShowGameOver?.(true);
+        lastFinishedGameIdRef.current = nextId;
+      } else if (!nextFinished && lastFinishedGameIdRef.current === nextId) {
+        lastFinishedGameIdRef.current = null;
+        setShowGameOver?.(false);
       } else if (finishTransition === false) {
         setShowGameOver?.(false);
       }
