@@ -30,36 +30,30 @@ export const useGameData = ({
 
   const setGame = useCallback(
     (updater) => {
-      let finishTransition = null;
-      let nextSnapshot = null;
-      setGameState((prev) => {
-        const next =
-          typeof updater === "function" ? updater(prev) : updater ?? null;
-        const prevFinished = !!prev?.finished_at;
-        const nextFinished = !!next?.finished_at;
-        if (prevFinished !== nextFinished) {
-          finishTransition = nextFinished;
-        }
-        nextSnapshot = next;
-        return next;
-      });
+      const prev = gameRef.current;
+      const next =
+        typeof updater === "function" ? updater(prev) : updater ?? null;
+      const prevFinished = !!prev?.finished_at;
+      const nextFinished = !!next?.finished_at;
 
-      if (finishTransition === true) {
+      if (nextFinished && !prevFinished) {
         setSelectedCard(null);
         setTargetSquare(null);
       }
 
-      const nextId = nextSnapshot?.id;
-      const nextFinished = !!nextSnapshot?.finished_at;
+      const nextId = next?.id;
       if (nextFinished && nextId && lastFinishedGameIdRef.current !== nextId) {
         setShowGameOver?.(true);
         lastFinishedGameIdRef.current = nextId;
       } else if (!nextFinished && lastFinishedGameIdRef.current === nextId) {
         lastFinishedGameIdRef.current = null;
         setShowGameOver?.(false);
-      } else if (finishTransition === false) {
+      } else if (!nextFinished && prevFinished) {
         setShowGameOver?.(false);
       }
+
+      gameRef.current = next;
+      setGameState(next);
     },
     [setShowGameOver]
   );

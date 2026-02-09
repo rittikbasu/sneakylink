@@ -529,7 +529,7 @@ export default function RoomPage() {
     if (!playerId) {
       return (
         <RoomGate
-          gameFinished={!!game?.finished_at}
+          gameFinished={room?.status === "finished" || !!game?.finished_at}
           onBack={() => router.push("/")}
         />
       );
