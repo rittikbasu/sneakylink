@@ -86,12 +86,11 @@ export const useRoomData = ({
   }, [code, setPlayers, setRoom]);
 
   const joinRoomWithClient = useCallback(
-    async ({ name, playerId: legacyPlayerId } = {}) => {
+    async ({ name } = {}) => {
       if (!code) return { ok: false, data: { error: "Missing code" } };
       const clientId = getClientId();
       const payload = { code, client_id: clientId };
       if (name) payload.name = name;
-      if (legacyPlayerId) payload.player_id = legacyPlayerId;
 
       try {
         const res = await fetch("/api/join-room", {
@@ -118,32 +117,7 @@ export const useRoomData = ({
 
     (async () => {
       setResolvingPlayer(true);
-      // Attempt rejoin / auto-join using client_id
       try {
-        const legacyPid = localStorage.getItem(`seq_pid:${code}`);
-        if (legacyPid) {
-          const { ok, data } = await joinRoomWithClient({
-            playerId: legacyPid,
-          });
-          if (cancelled) return;
-          if (ok) {
-            setPlayerId(data.player_id);
-            setAskNameOpen(false);
-            setKickedNotice(false);
-            refreshRoomState("legacy-rejoin", true);
-            try {
-              localStorage.removeItem(`seq_pid:${code}`);
-            } catch {}
-            return;
-          }
-          const legacyErr = data?.error;
-          if (legacyErr === "Player not found in this room") {
-            try {
-              localStorage.removeItem(`seq_pid:${code}`);
-            } catch {}
-          }
-        }
-
         const savedName = localStorage.getItem("seq_name");
         const trimmedName = savedName?.trim();
         if (trimmedName) setNameSubmitting(true);
@@ -185,32 +159,14 @@ export const useRoomData = ({
   }, [code, joinRoomWithClient, playerId, refreshRoomState, setPlayerId]);
 
   useEffect(() => {
-    if (!room || room.status === "lobby") return;
-    if (playerId || resolvingPlayer) return;
-    let cancelled = false;
-
-    (async () => {
-      setResolvingPlayer(true);
-      const { ok, data } = await joinRoomWithClient();
-      if (cancelled) return;
-      if (ok) {
-        setPlayerId(data.player_id);
-        refreshRoomState("active-rejoin", true);
-      }
-      setResolvingPlayer(false);
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    joinRoomWithClient,
-    playerId,
-    refreshRoomState,
-    resolvingPlayer,
-    room,
-    setPlayerId,
-  ]);
+    if (playerId) return;
+    if (!players?.length) return;
+    const clientId = getClientId();
+    const match = players.find((p) => p.client_id === clientId);
+    if (match) {
+      setPlayerId(match.id);
+    }
+  }, [playerId, players, setPlayerId]);
 
   const submitNameJoin = useCallback(async () => {
     if (!tempName.trim()) {
